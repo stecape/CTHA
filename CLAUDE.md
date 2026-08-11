@@ -17,12 +17,14 @@ multi-scenario, livelli di temperatura ereditati, template riutilizzabili e
 gestione elegante degli override a livello hardware provenienti dai
 termostati fisici e dall'unità centrale.
 
-**Nota sullo stato del codice**: l'implementazione attuale in
-`custom_components/ctha/` (vedi sotto) è un MVP generico a singola zona —
-un'entità `climate` a isteresi che pilota un attuatore qualsiasi (`switch`,
-`input_boolean` o `climate`), senza alcun riferimento specifico a BTicino o
-MyHOME. Rappresenta il punto di partenza su cui costruire l'architettura
-target multi-zona descritta di seguito, non ancora realizzata nel codice.
+**Nota sullo stato del codice**: il backend dell'architettura target è
+implementato in `custom_components/ctha/` — modello dati a riferimenti,
+risoluzione su due assi, override con soppressione echo, persistenza su Store,
+watchdog di riconciliazione e servizi. Restano fuori dal codice il frontend
+React e l'adattatore specifico BTicino/MyHOME: l'attuazione avviene ancora
+tramite isteresi su un attuatore generico (`switch`, `input_boolean` o
+`climate`), che è il punto in cui si innesterà la scrittura dei setpoint sul
+bus OpenWebNet.
 
 Dominio dell'integrazione: `ctha`. Tipo: `helper`, `iot_class: local_push`.
 
@@ -30,16 +32,27 @@ Dominio dell'integrazione: `ctha`. Tipo: `helper`, `iot_class: local_push`.
 
 ```
 custom_components/ctha/
-├── __init__.py       # setup/unload della config entry, forward alla piattaforma climate
-├── climate.py         # CthaThermostat: entità climate e logica a isteresi
+├── __init__.py        # setup/unload delle entry, avvio del runtime condiviso
+├── climate.py         # CthaThermostat: entità di zona, attuazione a isteresi
 ├── config_flow.py     # CthaConfigFlow (setup iniziale) e CthaOptionsFlow (tolleranze)
-├── const.py           # DOMAIN, chiavi di config, default, limiti setpoint
-├── manifest.json       # metadati dell'integrazione (versione, requisiti, HA minimo)
-├── strings.json        # stringhe UI sorgente per config/options flow
-└── translations/       # it.json, en.json — tenute sincronizzate con strings.json
+├── const.py           # DOMAIN, chiavi di config, livelli, timing, default
+├── coordinator.py     # CthaCoordinator: programma, override, watchdog
+├── models.py          # dataclass del modello dati, serializzabili nello Store
+├── override.py        # OverrideManager: policy di scadenza e soppressione echo
+├── resolve.py         # funzioni pure: slot, livelli, resolve_setpoint
+├── services.py        # servizi set_override / clear_override
+├── store.py           # CthaStore: persistenza via Store helper
+├── manifest.json      # metadati dell'integrazione (versione, requisiti, HA minimo)
+├── services.yaml      # schema dei servizi per la UI
+├── strings.json       # stringhe UI sorgente per config/options flow e servizi
+└── translations/      # it.json, en.json — tenute sincronizzate con strings.json
 hacs.json                # metadati per la distribuzione via HACS
 README.md                # documentazione utente (installazione, config, roadmap)
 ```
+
+`resolve.py`, `models.py` e `override.py` non importano `homeassistant`: sono
+logica pura, testabile senza far girare HA. Tenerli così è deliberato — è
+l'unica parte del componente verificabile a costo zero.
 
 Non esistono ancora test automatici né una config di sviluppo Home Assistant
 nel repo (vedi Roadmap: `pytest-homeassistant-custom-component` è previsto ma
@@ -47,19 +60,42 @@ non presente).
 
 ## Architettura
 
+**Una config entry = una zona; il programma è condiviso.** Store, coordinator
+e servizi sono istanze uniche in `hass.data[DOMAIN]`, create con la prima
+entry e smontate con l'ultima. È la ragione per cui il coordinator non è per
+zona: la riconciliazione deve scaglionare le scritture di tutte le zone su un
+unico bus.
+
 - **Config entry**: creata da `CthaConfigFlow.async_step_user`, richiede
   `name`, `sensor_entity_id` (sensore con `device_class: temperature`) e
-  `heater_entity_id` (dominio `switch`, `input_boolean` o `climate`). Un solo
-  cronotermostato per attuatore (`_async_abort_entries_match`).
+  `heater_entity_id` (dominio `switch`, `input_boolean` o `climate`). Una sola
+  zona per attuatore (`_async_abort_entries_match`). L'id della zona è
+  l'`entry_id`.
 - **Options flow**: `CthaOptionsFlow` permette di rivedere a caldo
   `cold_tolerance` e `hot_tolerance` (isteresi, default 0.3 °C ciascuna).
-- **`__init__.py`**: inoltra il setup alla piattaforma `climate` e registra un
-  listener che ricarica la entry quando cambiano le opzioni.
-- **`CthaThermostat` (climate.py)**: unica entità della piattaforma.
-  - Estende `ClimateEntity` + `RestoreEntity`: ripristina modalità HVAC,
-    preset e setpoint dopo un riavvio di Home Assistant.
-  - Si iscrive ai cambi di stato del sensore via
-    `async_track_state_change_event`.
+- **`models.py`**: `CthaData` è la radice persistita — setpoint globali,
+  `DayTemplate`, `WeekTemplate`, `Scenario`, `Zone`, `Override`, scenario
+  attivo. Ogni dataclass ha `to_dict`/`from_dict`; `DayTemplate` valida in
+  `__post_init__` che gli slot siano 48 caratteri noti, così un template
+  malformato non arriva mai allo Store.
+- **`resolve.py`**: `resolve_level` percorre l'asse temporale,
+  `resolve_temperature` quello termico, `resolve_setpoint` li combina.
+  Restituiscono una `Resolution` che porta con sé la provenienza (`zone` o
+  `global`), perché la UI deve poter mostrare *da dove* viene un valore.
+- **`override.py`**: `OverrideManager` tiene il registro degli override,
+  riconosce le eco delle nostre scritture (`note_write` / `is_echo`) e applica
+  le scadenze (`is_expired`, `purge_expired`). Gli override `hardware` non
+  scadono mai: nessun comando software può annullarli.
+- **`coordinator.py`**: `CthaCoordinator` espone `target_for` (override se
+  presente, altrimenti programma) e applica i setpoint tramite writer
+  registrati dalle entità. Due timer: uno a ogni confine di slot (00 e 30),
+  uno ogni `RECONCILE_INTERVAL` per il watchdog.
+- **`CthaThermostat` (climate.py)**: entità di zona.
+  - Estende `CoordinatorEntity` + `ClimateEntity` + `RestoreEntity`.
+  - Non decide più il setpoint: lo riceve dal coordinator tramite il writer
+    `_async_apply_setpoint`. Qui resta solo l'attuazione.
+  - `async_set_temperature` e `async_set_preset_mode` creano un **override**
+    (policy `next_slot`), non modificano il programma.
   - Logica a isteresi in `_async_control_heating`: accende l'attuatore se
     `current <= target - cold_tolerance`, lo spegne se
     `current >= target + hot_tolerance`; se `hvac_mode == OFF` lo spegne e
@@ -67,13 +103,11 @@ non presente).
   - `_async_set_heater` chiama `turn_on`/`turn_off` sul dominio
     dell'attuatore solo se lo stato deve effettivamente cambiare (evita
     chiamate ridondanti al servizio).
-  - Preset supportati: `comfort` (21 °C), `eco` (18 °C), `antifreeze` (7 °C),
-    definiti in `PRESET_TEMPERATURES` (climate.py) a partire dai default in
-    `const.py`.
+  - I preset corrispondono ai livelli: `comfort`, `eco`, `antifreeze`.
 
-Tutte le costanti condivise (chiavi di config, default, limiti setpoint)
-vivono in `const.py`: aggiungere nuove chiavi lì, non come stringhe sparse
-nel codice.
+Tutte le costanti condivise (chiavi di config, livelli, timing, default,
+limiti setpoint) vivono in `const.py`: aggiungere nuove chiavi lì, non come
+stringhe sparse nel codice.
 
 ## Convenzioni di codice
 
@@ -102,68 +136,63 @@ Per validare modifiche manualmente:
 Quando si aggiunge una suite di test (roadmap), usare
 `pytest-homeassistant-custom-component` come indicato nel README.
 
-## Architettura target (progettazione, non ancora implementata)
+## Architettura target — cosa è già in codice
 
 L'architettura completa è stata progettata nel corso di tre sessioni
-progressive ed è ora ben definita, anche se non ancora tradotta in codice:
+progressive. Stato attuale di ciascun pezzo:
 
 - **Struttura del componente**: backend Python come componente custom in
-  `config/custom_components/<domain>/`, con un frontend React incapsulato in
-  un Web Component, distribuito come pannello nella sidebar (non come card).
-  React è stato scelto deliberatamente al posto di Lit data la complessità
-  dell'interfaccia di programmazione.
-- **Modello dei dati**: basato su riferimenti, con stringhe di 48 caratteri
-  (granularità di 30 minuti) per ogni day template. I valori `null`
-  rappresentano esplicitamente l'ereditarietà dai setpoint globali. Lo
-  storage usa lo Store helper di HA anziché le opzioni della config entry.
-- **Risoluzione termica/temporale**: nettamente separata — l'asse temporale
+  `config/custom_components/<domain>/` — *fatto*. Frontend React incapsulato
+  in un Web Component, distribuito come pannello nella sidebar (non come
+  card) — *da fare*. React è stato scelto deliberatamente al posto di Lit
+  data la complessità dell'interfaccia di programmazione.
+- **Modello dei dati** — *fatto* (`models.py`): basato su riferimenti, con
+  stringhe di 48 caratteri (granularità di 30 minuti) per ogni day template.
+  I valori `null` rappresentano esplicitamente l'ereditarietà dai setpoint
+  globali. Lo storage usa lo Store helper di HA (`store.py`) anziché le
+  opzioni della config entry.
+- **Risoluzione termica/temporale** — *fatto* (`resolve.py`): l'asse temporale
   (scenario → week_template → day_template → slot → level) è indipendente
   dall'asse termico (setpoint di zona → offset di scenario → setpoint
-  globale), risolti tramite una funzione pura `resolve_setpoint`.
-- **Architettura degli override**: identificati e gestiti in modo
-  differenziato tre tipi di override fondamentalmente distinti:
-  - scritture avviate da HA: sopprimibili tramite rilevamento echo (finestra
-    di 60 secondi, tolleranza deadband di 0.15 °C);
+  globale), risolti tramite la funzione pura `resolve_setpoint`.
+- **Architettura degli override** — *fatta* (`override.py`), con i tre tipi
+  distinti:
+  - scritture avviate da HA: soppresse tramite rilevamento echo (finestra di
+    60 secondi, tolleranza deadband di 0.15 °C);
   - scritture da app esterne/unità centrale: rilevabili e con scadenza;
   - regolazioni manuali sulla manopola fisica F430/4: un offset hardware
     persistente che non può essere annullato via software — può solo essere
-    compensato o mostrato nell'interfaccia.
-  - Politiche di scadenza degli override definite: `next_slot`, `duration`,
+    compensato o mostrato nell'interfaccia. Nel codice: `source = hardware`,
+    mai soggetto a scadenza.
+  - Politiche di scadenza implementate: `next_slot`, `duration`,
     `until_scenario_change` e `sticky`.
-- **Mitigazione dei conflitti con l'unità centrale 3550**: due strategie —
-  appiattire il programma settimanale della 3550 stessa per eliminare i suoi
-  punti di cambio, più un loop di riconciliazione watchdog che riscrive i
-  setpoint desiderati ogni 10–15 minuti con scritture scaglionate (1.5 s tra
-  una zona e l'altra) per non sovraccaricare il bus OpenWebNet.
-- **Servizi HA**: `termo_zone.set_override` e `termo_zone.clear_override` da
-  esporre presto, per consentire override guidati da automazioni prima che
-  il frontend sia completo.
+- **Mitigazione dei conflitti con l'unità centrale 3550**: il loop di
+  riconciliazione watchdog è *fatto* (`coordinator.py`, `RECONCILE_INTERVAL`
+  = 12 min, scritture scaglionate di `WRITE_STAGGER_SECONDS` = 1.5 s).
+  L'appiattimento del programma settimanale della 3550 stessa è *da fare* e
+  richiede l'adattatore MyHOME.
+- **Servizi HA** — *fatti*: `ctha.set_override` e `ctha.clear_override`.
+  Attenzione: il nome storico in progettazione era `termo_zone.*`, ma il
+  dominio dell'integrazione è `ctha` e i servizi devono starci dentro.
 
 ## Prossimi passi
 
-- Implementare la logica di soppressione echo e la gestione della scadenza
-  degli override
 - Costruire la griglia UI di programmazione con interazione paint-drag
 - Funzionalità UI da implementare: visualizzazione dei valori ereditati con
-  la relativa fonte, vista delle dipendenze "chi usa questo template" e una
+  la relativa fonte (già esposta negli attributi dell'entità come
+  `setpoint_source`), vista delle dipendenze "chi usa questo template" e una
   scappatoia "duplica e scollega" per i template
+- Servizi per creare e modificare scenari e template dalle automazioni: oggi
+  il modello si può leggere ma non editare senza frontend
+- Adattatore MyHOME/BTicino: scrittura dei setpoint sul bus al posto
+  dell'isteresi generica, e lettura dei messaggi di offset locale per
+  registrare gli override `hardware`
 - Probabile necessità di fare un fork personale dell'integrazione MyHOME,
   poiché il progetto upstream è di fatto non mantenuto dall'inizio del 2024
-
-Roadmap dell'MVP attuale (README), propedeutica o parallela a quanto sopra:
-
-- Programma settimanale (fasce orarie per giorno, editor da UI)
-- Applicazione automatica dei preset in base al programma
-- Override manuale temporaneo con rientro automatico nel programma
-- Modalità vacanza / assenza
 - Durata minima di ciclo per proteggere la caldaia (`CONF_MIN_CYCLE_DURATION`
-  è già definita in `const.py` ma non ancora usata in `climate.py`)
-- Test con `pytest-homeassistant-custom-component`
-- Card Lovelace dedicata per il programma settimanale
-
-`CONF_SCHEDULE` in `const.py` è un'altra chiave predisposta per il
-programmatore settimanale ma non ancora consumata da nessun modulo: è il
-punto di partenza naturale per implementare la roadmap.
+  è definita in `const.py` ma non ancora usata in `climate.py`)
+- Test con `pytest-homeassistant-custom-component` per la parte che tocca HA;
+  il nucleo puro è già verificabile senza
 
 ## Apprendimenti e principi chiave
 

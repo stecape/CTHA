@@ -12,7 +12,7 @@
       }
     },
     "abort": {
-      "already_configured": "Esiste già un cronotermostato per questo attuatore."
+      "already_configured": "Esiste già una zona per questo attuatore."
     }
   },
   "options": {
@@ -22,6 +22,40 @@
         "data": {
           "cold_tolerance": "Tolleranza sotto il setpoint",
           "hot_tolerance": "Tolleranza sopra il setpoint"
+        }
+      }
+    }
+  },
+  "services": {
+    "set_override": {
+      "name": "Imposta override",
+      "description": "Forza una temperatura su una zona, scavalcando il programma.",
+      "fields": {
+        "zone_id": {
+          "name": "Zona",
+          "description": "Identificatore della zona (corrisponde alla config entry)."
+        },
+        "temperature": {
+          "name": "Temperatura",
+          "description": "Temperatura da mantenere finché l'override è valido."
+        },
+        "policy": {
+          "name": "Scadenza",
+          "description": "Quando l'override decade: fine dello slot corrente, durata fissa, cambio di scenario, oppure mai."
+        },
+        "duration": {
+          "name": "Durata",
+          "description": "Durata dell'override, usata solo con la scadenza a durata fissa."
+        }
+      }
+    },
+    "clear_override": {
+      "name": "Rimuovi override",
+      "description": "Elimina l'override di una zona e la riporta al programma.",
+      "fields": {
+        "zone_id": {
+          "name": "Zona",
+          "description": "Identificatore della zona (corrisponde alla config entry)."
         }
       }
     }

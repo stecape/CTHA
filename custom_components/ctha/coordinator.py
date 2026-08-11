@@ -1,0 +1,202 @@
+"""Runtime condiviso di CTHA: programma, override e riconciliazione.
+
+Il coordinator è unico per installazione e non per zona: il programma
+settimanale è condiviso, e la riconciliazione deve poter scaglionare le
+scritture di tutte le zone su un unico bus.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta
+
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import (
+    async_track_time_change,
+    async_track_time_interval,
+)
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
+
+from .const import (
+    DOMAIN,
+    OVERRIDE_SOURCE_HA,
+    POLICY_NEXT_SLOT,
+    RECONCILE_INTERVAL,
+    SLOT_MINUTES,
+    WRITE_STAGGER_SECONDS,
+)
+from .models import CthaData, Override, Zone
+from .override import OverrideManager
+from .resolve import Resolution, resolve_setpoint
+from .store import CthaStore
+
+_LOGGER = logging.getLogger(__name__)
+
+ZoneWriter = Callable[[float], Awaitable[None]]
+
+
+class CthaCoordinator(DataUpdateCoordinator[CthaData]):
+    """Tiene insieme modello, override e i due timer che li fanno vivere."""
+
+    def __init__(self, hass: HomeAssistant, store: CthaStore) -> None:
+        """Prepara il coordinator; i dati arrivano con `async_initialize`."""
+        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=None)
+        self._store = store
+        self._writers: dict[str, ZoneWriter] = {}
+        self._unsubscribers: list[Callable[[], None]] = []
+        self.overrides = OverrideManager(store.data)
+
+    async def _async_update_data(self) -> CthaData:
+        """Il modello è locale: non c'è nulla da interrogare, si rilegge lo Store."""
+        return self._store.data
+
+    async def async_initialize(self) -> None:
+        """Carica il modello e avvia i timer di slot e riconciliazione."""
+        data = await self._store.async_load()
+        self.overrides = OverrideManager(data)
+        self.async_set_updated_data(data)
+
+        self._unsubscribers.append(
+            async_track_time_change(
+                self.hass,
+                self._async_slot_tick,
+                minute=list(range(0, 60, SLOT_MINUTES)),
+                second=0,
+            )
+        )
+        self._unsubscribers.append(
+            async_track_time_interval(
+                self.hass, self._async_reconcile, RECONCILE_INTERVAL
+            )
+        )
+
+    async def async_shutdown(self) -> None:
+        """Ferma i timer quando l'ultima entry viene rimossa."""
+        while self._unsubscribers:
+            self._unsubscribers.pop()()
+        await super().async_shutdown()
+
+    # --- Registrazione delle zone -------------------------------------------
+
+    def register_zone(self, zone_id: str, name: str) -> Zone:
+        """Assicura che la zona esista nel modello e la restituisce."""
+        if (zone := self.data.zones.get(zone_id)) is None:
+            zone = Zone(id=zone_id, name=name)
+            self.data.zones[zone_id] = zone
+            self._store.async_schedule_save()
+        elif zone.name != name:
+            zone.name = name
+            self._store.async_schedule_save()
+        return zone
+
+    @callback
+    def register_writer(self, zone_id: str, writer: ZoneWriter) -> Callable[[], None]:
+        """Registra la funzione che applica un setpoint alla zona."""
+        self._writers[zone_id] = writer
+
+        @callback
+        def _unregister() -> None:
+            self._writers.pop(zone_id, None)
+
+        return _unregister
+
+    # --- Lettura del programma ----------------------------------------------
+
+    def resolution_for(self, zone_id: str, now: datetime | None = None) -> Resolution:
+        """Risoluzione da programma per la zona, senza considerare gli override."""
+        return resolve_setpoint(self.data, zone_id, now or dt_util.now())
+
+    def target_for(self, zone_id: str, now: datetime | None = None) -> float | None:
+        """Setpoint effettivo: l'override attivo se c'è, altrimenti il programma."""
+        if (override := self.overrides.get(zone_id)) is not None:
+            return override.temperature
+        return self.resolution_for(zone_id, now).temperature
+
+    # --- Scrittura ----------------------------------------------------------
+
+    async def async_apply_zone(self, zone_id: str, now: datetime | None = None) -> None:
+        """Applica alla zona il setpoint corrente, annotando la scrittura."""
+        if (writer := self._writers.get(zone_id)) is None:
+            return
+        if (target := self.target_for(zone_id, now)) is None:
+            return
+
+        self.overrides.note_write(zone_id, target, now or dt_util.now())
+        await writer(target)
+
+    async def async_apply_all(self, now: datetime | None = None) -> None:
+        """Riscrive tutte le zone scaglionando le scritture sul bus."""
+        for index, zone_id in enumerate(list(self._writers)):
+            if index:
+                await asyncio.sleep(WRITE_STAGGER_SECONDS)
+            try:
+                await self.async_apply_zone(zone_id, now)
+            except Exception:  # noqa: BLE001 - una zona non deve fermare le altre
+                _LOGGER.exception("Riconciliazione fallita per la zona %s", zone_id)
+
+    # --- Override -----------------------------------------------------------
+
+    async def async_set_override(
+        self,
+        zone_id: str,
+        temperature: float,
+        policy: str = POLICY_NEXT_SLOT,
+        duration: timedelta | None = None,
+        source: str = OVERRIDE_SOURCE_HA,
+    ) -> Override:
+        """Registra un override e lo applica subito alla zona."""
+        override = self.overrides.set(
+            zone_id,
+            temperature,
+            dt_util.now(),
+            source=source,
+            policy=policy,
+            duration=duration,
+        )
+        self._store.async_schedule_save()
+        await self.async_apply_zone(zone_id)
+        self.async_update_listeners()
+        return override
+
+    async def async_clear_override(self, zone_id: str) -> None:
+        """Rimuove l'override e riporta la zona al programma."""
+        if self.overrides.clear(zone_id) is None:
+            return
+        self._store.async_schedule_save()
+        await self.async_apply_zone(zone_id)
+        self.async_update_listeners()
+
+    async def async_set_active_scenario(self, scenario_id: str) -> None:
+        """Cambia scenario, facendo decadere gli override legati al precedente."""
+        if scenario_id not in self.data.scenarios:
+            raise ValueError(f"Scenario sconosciuto: {scenario_id}")
+
+        self.data.active_scenario = scenario_id
+        self.overrides.purge_expired(dt_util.now())
+        self._store.async_schedule_save()
+        await self.async_apply_all()
+        self.async_update_listeners()
+
+    # --- Timer --------------------------------------------------------------
+
+    async def _async_slot_tick(self, now: datetime) -> None:
+        """A ogni confine di slot: scadenze degli override e nuovi setpoint."""
+        if self.overrides.purge_expired(now):
+            self._store.async_schedule_save()
+        await self.async_apply_all(now)
+        self.async_update_listeners()
+
+    async def _async_reconcile(self, now: datetime) -> None:
+        """Watchdog: riafferma i setpoint desiderati contro chi li sovrascrive."""
+        await self.async_apply_all(now)
+
+
+def async_get_coordinator(hass: HomeAssistant, store: CthaStore) -> CthaCoordinator:
+    """Restituisce il coordinator condiviso, creandolo alla prima entry."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if (coordinator := domain_data.get("coordinator")) is None:
+        coordinator = domain_data["coordinator"] = CthaCoordinator(hass, store)
+    return coordinator

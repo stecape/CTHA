@@ -1,4 +1,9 @@
-"""Entità climate del cronotermostato CTHA."""
+"""Entità climate di CTHA: una zona termica pilotata dal programma.
+
+L'entità non decide più da sola quale temperatura tenere: il setpoint arriva
+dal coordinator (programma settimanale più eventuale override) e qui resta
+solo l'attuazione — isteresi sull'attuatore e lettura del sensore.
+"""
 
 from __future__ import annotations
 
@@ -27,6 +32,7 @@ from homeassistant.core import Event, EventStateChangedData, HomeAssistant, call
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_COLD_TOLERANCE,
@@ -35,25 +41,26 @@ from .const import (
     CONF_SENSOR,
     DEFAULT_COLD_TOLERANCE,
     DEFAULT_HOT_TOLERANCE,
-    DEFAULT_TEMP_ANTIFREEZE,
-    DEFAULT_TEMP_COMFORT,
-    DEFAULT_TEMP_ECO,
     DOMAIN,
+    LEVEL_ANTIFREEZE,
+    LEVEL_COMFORT,
+    LEVEL_ECO,
     MAX_TEMP,
     MIN_TEMP,
-    PRESET_ANTIFREEZE,
-    PRESET_COMFORT,
-    PRESET_ECO,
+    POLICY_NEXT_SLOT,
     TEMP_STEP,
 )
+from .coordinator import CthaCoordinator
+from .resolve import resolve_temperature
 
 _LOGGER = logging.getLogger(__name__)
 
-PRESET_TEMPERATURES: dict[str, float] = {
-    PRESET_COMFORT: DEFAULT_TEMP_COMFORT,
-    PRESET_ECO: DEFAULT_TEMP_ECO,
-    PRESET_ANTIFREEZE: DEFAULT_TEMP_ANTIFREEZE,
-}
+ATTR_LEVEL = "level"
+ATTR_SETPOINT_SOURCE = "setpoint_source"
+ATTR_SCENARIO = "scenario"
+ATTR_OVERRIDE_SOURCE = "override_source"
+ATTR_OVERRIDE_POLICY = "override_policy"
+ATTR_OVERRIDE_EXPIRES = "override_expires_at"
 
 
 async def async_setup_entry(
@@ -61,19 +68,19 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Crea l'entità climate per la config entry."""
-    async_add_entities([CthaThermostat(entry)])
+    """Crea l'entità climate della zona descritta dalla config entry."""
+    coordinator: CthaCoordinator = hass.data[DOMAIN]["coordinator"]
+    async_add_entities([CthaThermostat(coordinator, entry)])
 
 
-class CthaThermostat(ClimateEntity, RestoreEntity):
-    """Termostato con isteresi, base del cronotermostato CTHA."""
+class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity, RestoreEntity):
+    """Zona termica: applica il setpoint del programma con controllo a isteresi."""
 
     _attr_has_entity_name = True
     _attr_name = None
-    _attr_should_poll = False
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
-    _attr_preset_modes = [PRESET_COMFORT, PRESET_ECO, PRESET_ANTIFREEZE]
+    _attr_preset_modes = [LEVEL_COMFORT, LEVEL_ECO, LEVEL_ANTIFREEZE]
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.PRESET_MODE
@@ -84,9 +91,11 @@ class CthaThermostat(ClimateEntity, RestoreEntity):
     _attr_max_temp = MAX_TEMP
     _attr_target_temperature_step = TEMP_STEP
 
-    def __init__(self, entry: ConfigEntry) -> None:
-        """Inizializza il termostato dalla config entry."""
+    def __init__(self, coordinator: CthaCoordinator, entry: ConfigEntry) -> None:
+        """Lega l'entità alla zona corrispondente alla config entry."""
+        super().__init__(coordinator)
         self._entry = entry
+        self._zone_id = entry.entry_id
         self._sensor_entity_id: str = entry.data[CONF_SENSOR]
         self._heater_entity_id: str = entry.data[CONF_HEATER]
         self._cold_tolerance: float = entry.options.get(
@@ -104,21 +113,21 @@ class CthaThermostat(ClimateEntity, RestoreEntity):
         }
 
         self._attr_hvac_mode = HVACMode.OFF
-        self._attr_preset_mode = PRESET_COMFORT
-        self._attr_target_temperature = DEFAULT_TEMP_COMFORT
+        self._attr_target_temperature: float | None = None
         self._attr_current_temperature: float | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Ripristina lo stato e si iscrive agli aggiornamenti del sensore."""
+        """Registra la zona, ripristina lo stato e si aggancia al sensore."""
         await super().async_added_to_hass()
+
+        self.coordinator.register_zone(self._zone_id, self._entry.data[CONF_NAME])
+        self.async_on_remove(
+            self.coordinator.register_writer(self._zone_id, self._async_apply_setpoint)
+        )
 
         if (last_state := await self.async_get_last_state()) is not None:
             if last_state.state in (HVACMode.HEAT, HVACMode.OFF):
                 self._attr_hvac_mode = HVACMode(last_state.state)
-            if (preset := last_state.attributes.get("preset_mode")) in self._attr_preset_modes:
-                self._attr_preset_mode = preset
-            if (target := last_state.attributes.get(ATTR_TEMPERATURE)) is not None:
-                self._attr_target_temperature = float(target)
 
         self.async_on_remove(
             async_track_state_change_event(
@@ -127,16 +136,46 @@ class CthaThermostat(ClimateEntity, RestoreEntity):
         )
 
         self._async_read_sensor(self.hass.states.get(self._sensor_entity_id))
+        self._attr_target_temperature = self.coordinator.target_for(self._zone_id)
         await self._async_control_heating()
 
     @property
     def hvac_action(self) -> HVACAction:
-        """Restituisce l'azione in corso, letta dallo stato dell'attuatore."""
+        """Azione in corso, dedotta dallo stato reale dell'attuatore."""
         if self._attr_hvac_mode == HVACMode.OFF:
             return HVACAction.OFF
         if self._is_heater_active:
             return HVACAction.HEATING
         return HVACAction.IDLE
+
+    @property
+    def preset_mode(self) -> str | None:
+        """Livello risolto dal programma; `None` mentre un override è attivo."""
+        if self.coordinator.overrides.get(self._zone_id) is not None:
+            return None
+        return self.coordinator.resolution_for(self._zone_id).level
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Espone provenienza del setpoint e stato dell'override.
+
+        Serve a rendere leggibile l'ereditarietà: senza questi attributi non
+        si distingue un setpoint proprio della zona da uno globale, né si vede
+        quando un override decadrà.
+        """
+        resolution = self.coordinator.resolution_for(self._zone_id)
+        attributes: dict[str, Any] = {
+            ATTR_LEVEL: resolution.level,
+            ATTR_SETPOINT_SOURCE: resolution.source,
+            ATTR_SCENARIO: self.coordinator.data.active_scenario,
+        }
+        if (override := self.coordinator.overrides.get(self._zone_id)) is not None:
+            attributes[ATTR_OVERRIDE_SOURCE] = override.source
+            attributes[ATTR_OVERRIDE_POLICY] = override.policy
+            attributes[ATTR_OVERRIDE_EXPIRES] = (
+                override.expires_at.isoformat() if override.expires_at else None
+            )
+        return attributes
 
     @property
     def _is_heater_active(self) -> bool:
@@ -145,15 +184,15 @@ class CthaThermostat(ClimateEntity, RestoreEntity):
         return state is not None and state.state == STATE_ON
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
-        """Imposta il setpoint richiesto dall'utente."""
+        """Un setpoint scelto a mano è un override, non una modifica al programma."""
         if (temperature := kwargs.get(ATTR_TEMPERATURE)) is None:
             return
-        self._attr_target_temperature = float(temperature)
-        await self._async_control_heating()
-        self.async_write_ha_state()
+        await self.coordinator.async_set_override(
+            self._zone_id, float(temperature), policy=POLICY_NEXT_SLOT
+        )
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Accende o spegne il termostato."""
+        """Accende o spegne la zona."""
         if hvac_mode not in self._attr_hvac_modes:
             raise ValueError(f"Modalità HVAC non supportata: {hvac_mode}")
         self._attr_hvac_mode = hvac_mode
@@ -161,11 +200,34 @@ class CthaThermostat(ClimateEntity, RestoreEntity):
         self.async_write_ha_state()
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Applica un preset e il relativo setpoint."""
+        """Forza un livello: si traduce nell'override della sua temperatura."""
         if preset_mode not in self._attr_preset_modes:
             raise ValueError(f"Preset non supportato: {preset_mode}")
-        self._attr_preset_mode = preset_mode
-        self._attr_target_temperature = PRESET_TEMPERATURES[preset_mode]
+
+        zone = self.coordinator.data.zones.get(self._zone_id)
+        if zone is None:
+            return
+
+        resolution = resolve_temperature(
+            self.coordinator.data, zone, preset_mode, self.coordinator.data.active()
+        )
+        if resolution.temperature is None:
+            _LOGGER.warning("Nessun setpoint definito per il livello %s", preset_mode)
+            return
+
+        await self.coordinator.async_set_override(
+            self._zone_id, resolution.temperature, policy=POLICY_NEXT_SLOT
+        )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Recepisce un nuovo setpoint deciso dal coordinator."""
+        self._attr_target_temperature = self.coordinator.target_for(self._zone_id)
+        super()._handle_coordinator_update()
+
+    async def _async_apply_setpoint(self, temperature: float) -> None:
+        """Writer registrato nel coordinator: riceve il setpoint da tenere."""
+        self._attr_target_temperature = temperature
         await self._async_control_heating()
         self.async_write_ha_state()
 

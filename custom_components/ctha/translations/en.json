@@ -12,7 +12,7 @@
       }
     },
     "abort": {
-      "already_configured": "A chronothermostat already exists for this actuator."
+      "already_configured": "A zone already exists for this actuator."
     }
   },
   "options": {
@@ -22,6 +22,40 @@
         "data": {
           "cold_tolerance": "Tolerance below setpoint",
           "hot_tolerance": "Tolerance above setpoint"
+        }
+      }
+    }
+  },
+  "services": {
+    "set_override": {
+      "name": "Set override",
+      "description": "Force a temperature on a zone, bypassing the schedule.",
+      "fields": {
+        "zone_id": {
+          "name": "Zone",
+          "description": "Zone identifier (matches the config entry)."
+        },
+        "temperature": {
+          "name": "Temperature",
+          "description": "Temperature to hold while the override is valid."
+        },
+        "policy": {
+          "name": "Expiry",
+          "description": "When the override lapses: end of the current slot, fixed duration, scenario change, or never."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "Override duration, used only with the fixed-duration expiry."
+        }
+      }
+    },
+    "clear_override": {
+      "name": "Clear override",
+      "description": "Remove a zone's override and return it to the schedule.",
+      "fields": {
+        "zone_id": {
+          "name": "Zone",
+          "description": "Zone identifier (matches the config entry)."
         }
       }
     }
