@@ -1,0 +1,12 @@
+{
+  "domain": "ctha",
+  "name": "CTHA - Cronotermostato",
+  "codeowners": ["@stecape"],
+  "config_flow": true,
+  "documentation": "https://github.com/stecape/CTHA",
+  "integration_type": "helper",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/stecape/CTHA/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
