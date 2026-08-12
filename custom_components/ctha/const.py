@@ -125,6 +125,19 @@ SERVICE_ACTIVATE_SCENARIO: Final = "activate_scenario"
 SERVICE_SET_SETPOINT: Final = "set_setpoint"
 SERVICE_SET_ZONE_WEEK_TEMPLATE: Final = "set_zone_week_template"
 
+# --- Pannello frontend ------------------------------------------------------
+# Il bundle React vive dentro il componente e viene servito da un percorso
+# statico dedicato; il pannello lo carica come modulo ESM.
+PANEL_URL: Final = "/ctha-frontend"
+PANEL_MODULE: Final = f"{PANEL_URL}/ctha-panel.js"
+PANEL_PATH: Final = "ctha"
+PANEL_ELEMENT: Final = "ctha-panel"
+PANEL_TITLE: Final = "Cronotermostato"
+PANEL_ICON: Final = "mdi:calendar-clock"
+
+WS_GET: Final = f"{DOMAIN}/get"
+WS_SUBSCRIBE: Final = f"{DOMAIN}/subscribe"
+
 ATTR_ZONE_ID: Final = "zone_id"
 ATTR_POLICY: Final = "policy"
 ATTR_DURATION: Final = "duration"

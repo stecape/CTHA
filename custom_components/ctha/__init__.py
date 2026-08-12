@@ -13,8 +13,10 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .coordinator import CthaCoordinator, async_get_coordinator
+from .panel import async_register_panel, async_remove_panel
 from .services import async_register_services, async_unregister_services
 from .store import async_get_store
+from .websocket import async_register_websocket
 
 PLATFORMS: list[Platform] = [Platform.CLIMATE]
 
@@ -27,6 +29,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if not domain_data.get("initialized"):
         await coordinator.async_initialize()
+        async_register_websocket(hass)
+        await async_register_panel(hass)
         domain_data["initialized"] = True
 
     async_register_services(hass)
@@ -52,6 +56,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if coordinator is not None:
             await coordinator.async_shutdown()
         async_unregister_services(hass)
+        async_remove_panel(hass)
         hass.data.pop(DOMAIN, None)
 
     return True

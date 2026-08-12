@@ -17,14 +17,14 @@ multi-scenario, livelli di temperatura ereditati, template riutilizzabili e
 gestione elegante degli override a livello hardware provenienti dai
 termostati fisici e dall'unità centrale.
 
-**Nota sullo stato del codice**: il backend dell'architettura target è
-implementato in `custom_components/ctha/` — modello dati a riferimenti,
-risoluzione su due assi, override con soppressione echo, persistenza su Store,
-watchdog di riconciliazione, modifica del programma e servizi. Restano fuori
-dal codice il frontend React e l'adattatore specifico BTicino/MyHOME:
-l'attuazione avviene ancora tramite isteresi su un attuatore generico
-(`switch`, `input_boolean` o `climate`), che è il punto in cui si innesterà la
-scrittura dei setpoint sul bus OpenWebNet.
+**Nota sullo stato del codice**: l'architettura target è implementata in
+`custom_components/ctha/` (modello dati a riferimenti, risoluzione su due assi,
+override con soppressione echo, persistenza su Store, watchdog di
+riconciliazione, modifica del programma, servizi) e in `frontend/` (pannello
+React in sidebar con la griglia di programmazione). Resta fuori dal codice
+l'adattatore specifico BTicino/MyHOME: l'attuazione avviene ancora tramite
+isteresi su un attuatore generico (`switch`, `input_boolean` o `climate`), che
+è il punto in cui si innesterà la scrittura dei setpoint sul bus OpenWebNet.
 
 Dominio dell'integrazione: `ctha`. Tipo: `helper`, `iot_class: local_push`.
 
@@ -39,14 +39,18 @@ custom_components/ctha/
 ├── coordinator.py     # CthaCoordinator: programma, override, watchdog
 ├── models.py          # dataclass del modello dati, serializzabili nello Store
 ├── override.py        # OverrideManager: policy di scadenza e soppressione echo
+├── panel.py           # percorso statico del bundle + voce in sidebar
 ├── program.py         # funzioni pure di modifica: template, scenari, setpoint
 ├── resolve.py         # funzioni pure: slot, livelli, resolve_setpoint
 ├── services.py        # registrazione dei 13 servizi del dominio
 ├── store.py           # CthaStore: persistenza via Store helper
+├── websocket.py       # ctha/get e ctha/subscribe: lettura con push
+├── frontend/          # bundle compilato del pannello — versionato, non a mano
 ├── manifest.json      # metadati dell'integrazione (versione, requisiti, HA minimo)
 ├── services.yaml      # schema dei servizi per la UI
 ├── strings.json       # stringhe UI sorgente per config/options flow e servizi
 └── translations/      # it.json, en.json — tenute sincronizzate con strings.json
+frontend/                # sorgenti del pannello: Vite + React + TypeScript
 tests/                   # suite pytest sul nucleo puro (conftest.py + un file per modulo)
 pytest.ini               # testpaths = tests
 requirements_test.txt    # solo pytest: la suite non ha bisogno di HA
@@ -127,6 +131,44 @@ Tutte le costanti condivise (chiavi di config, livelli, timing, default,
 limiti setpoint) vivono in `const.py`: aggiungere nuove chiavi lì, non come
 stringhe sparse nel codice.
 
+## Il pannello
+
+`websocket.py` **legge**, i servizi **scrivono**. Il pannello non ha comandi
+websocket di scrittura apposta: validazione e integrità referenziale stanno già
+nei servizi, e duplicarle vorrebbe dire mantenerne due copie che prima o poi
+divergono. Lo snapshot di `ctha/subscribe` unisce il modello persistito e il
+`runtime` per zona (livello risolto, provenienza, override), perché il secondo
+è il risultato di `resolve_setpoint` e il frontend non può ricavarlo senza
+reimplementare la risoluzione in TypeScript.
+
+`panel.py` serve il bundle da un percorso statico e registra la voce in
+sidebar. Due dettagli non ovvi: la rotta statica si registra una volta sola per
+processo (le rotte di aiohttp non si rimuovono, quindi il flag è a livello di
+modulo), e l'url del modulo porta `?v=<versione del manifest>` perché senza il
+browser continuerebbe a servire il bundle vecchio dopo un aggiornamento.
+
+Il frontend è React dentro un Web Component su shadow root (`frontend/src/`):
+
+- `main.tsx` definisce `<ctha-panel>`; HA assegna la proprietà `hass` a ogni
+  cambio di stato della casa, quindi la sottoscrizione websocket passa da una
+  ref e si apre una volta sola (`App.tsx`).
+- `model.ts` sono funzioni pure che rifanno in TypeScript pezzi di
+  `program.py` — usanze di un template, esito di una pennellata. La
+  duplicazione è voluta: serve a mostrare l'effetto *prima* del giro sul
+  backend. La verità resta il backend, che rifiuta ciò che non è ammissibile.
+- `WeekGrid.tsx` ascolta il puntatore sulla riga, non sulle celle: la posizione
+  diventa un indice di slot con un calcolo sulla larghezza, così un
+  trascinamento resta *un* intervallo — la forma che `paint_slots` si aspetta.
+  Lo stato del trascinamento vive anche in una ref, perché il rilascio può
+  arrivare prima che React abbia applicato lo stato della pressione.
+- Il momento in cui si chiede "modifica per tutti o scollega?" è la pennellata
+  su una giornata tipo condivisa (`ProgramTab.tsx`): è lì che l'utente scopre
+  la condivisione, ed è lì che ha senso offrire la scappatoia.
+
+**Il bundle compilato è versionato.** HACS distribuisce il repository così
+com'è: dopo aver toccato `frontend/src/` bisogna rifare `npm run check` e
+committare anche `custom_components/ctha/frontend/ctha-panel.js`.
+
 ## Convenzioni di codice
 
 - Python moderno per Home Assistant: `from __future__ import annotations`,
@@ -153,6 +195,18 @@ python -m venv .venv
 .venv/Scripts/python -m pytest
 ```
 
+Il frontend si compila e si prova con:
+
+```bash
+cd frontend && npm install && npm run check
+```
+
+`npm run check` fa tre cose: `tsc`, il build Vite, e `test/smoke.mjs`, che
+monta il bundle in jsdom con un `hass` finto e verifica che la griglia si
+disegni e che una pennellata su un template condiviso apra il dialogo invece di
+scrivere. Non sostituisce la prova dentro HA — geometria, temi e bus non
+esistono in jsdom — ma intercetta le rotture grosse.
+
 `tests/conftest.py` registra `ctha` in `sys.modules` come package fittizio con
 il solo `__path__`: è ciò che permette di importare `ctha.models` senza
 eseguire l'`__init__.py` vero, che importerebbe `homeassistant`. Un modulo
@@ -175,8 +229,8 @@ progressive. Stato attuale di ciascun pezzo:
 - **Struttura del componente**: backend Python come componente custom in
   `config/custom_components/<domain>/` — *fatto*. Frontend React incapsulato
   in un Web Component, distribuito come pannello nella sidebar (non come
-  card) — *da fare*. React è stato scelto deliberatamente al posto di Lit
-  data la complessità dell'interfaccia di programmazione.
+  card) — *fatto* (vedi «Il pannello»). React è stato scelto deliberatamente al
+  posto di Lit data la complessità dell'interfaccia di programmazione.
 - **Modello dei dati** — *fatto* (`models.py`): basato su riferimenti, con
   stringhe di 48 caratteri (granularità di 30 minuti) per ogni day template.
   I valori `null` rappresentano esplicitamente l'ereditarietà dai setpoint
@@ -208,17 +262,13 @@ progressive. Stato attuale di ciascun pezzo:
   setpoint. Attenzione: il nome storico in progettazione era `termo_zone.*`, ma
   il dominio dell'integrazione è `ctha` e i servizi devono starci dentro.
   `paint_slots` prende un intervallo e non uno slot proprio perché è la
-  primitiva su cui poggerà il paint-drag della griglia.
+  primitiva su cui poggia il paint-drag della griglia.
+- **Interfaccia di programmazione** — *fatta*: griglia paint-drag, valori
+  ereditati mostrati con la loro fonte, vista delle dipendenze e scappatoia
+  "duplica e scollega" al momento in cui serve.
 
 ## Prossimi passi
 
-- Costruire la griglia UI di programmazione con interazione paint-drag, sopra i
-  servizi già esistenti
-- Funzionalità UI da implementare: visualizzazione dei valori ereditati con
-  la relativa fonte (già esposta negli attributi dell'entità come
-  `setpoint_source`) e vista delle dipendenze "chi usa questo template"
-  (i dati arrivano da `program.day_template_usages` e
-  `program.week_template_usages`)
 - Adattatore MyHOME/BTicino: scrittura dei setpoint sul bus al posto
   dell'isteresi generica, e lettura dei messaggi di offset locale per
   registrare gli override `hardware`
@@ -227,8 +277,11 @@ progressive. Stato attuale di ciascun pezzo:
 - Durata minima di ciclo per proteggere la caldaia (`CONF_MIN_CYCLE_DURATION`
   è definita in `const.py` ma non ancora usata in `climate.py`)
 - Test con `pytest-homeassistant-custom-component` per la parte che tocca HA:
-  coordinator, entità climate, registrazione dei servizi. Il nucleo puro è già
-  coperto da `tests/`
+  coordinator, entità climate, registrazione di servizi, websocket e pannello.
+  Il nucleo puro è già coperto da `tests/`, il bundle da `npm run smoke`
+- Prova del pannello dentro Home Assistant vero: finora è verificato solo in
+  jsdom, quindi geometria del trascinamento, temi e permessi non sono stati
+  visti funzionare
 
 ## Apprendimenti e principi chiave
 

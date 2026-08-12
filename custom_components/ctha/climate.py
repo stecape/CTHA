@@ -124,6 +124,9 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity, RestoreE
         self.async_on_remove(
             self.coordinator.register_writer(self._zone_id, self._async_apply_setpoint)
         )
+        self.async_on_remove(
+            self.coordinator.register_entity(self._zone_id, self.entity_id)
+        )
 
         if (last_state := await self.async_get_last_state()) is not None:
             if last_state.state in (HVACMode.HEAT, HVACMode.OFF):

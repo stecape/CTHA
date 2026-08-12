@@ -1,0 +1,556 @@
+/* Il pannello vive in uno shadow root: nessun rischio di collisione, quindi
+   niente prefissi. I colori si appoggiano alle variabili del tema di Home
+   Assistant, con un fallback per quando il pannello viene aperto fuori da un
+   tema completo. I colori dei livelli sono invece fissi: sono un codice, e un
+   codice deve restare lo stesso passando da tema chiaro a tema scuro. */
+
+:host {
+  --ctha-bg: var(--primary-background-color, #f2f3f5);
+  --ctha-card: var(--card-background-color, #fff);
+  --ctha-text: var(--primary-text-color, #1f2124);
+  --ctha-muted: var(--secondary-text-color, #6b7280);
+  --ctha-divider: var(--divider-color, #e0e2e6);
+  --ctha-accent: var(--primary-color, #0288d1);
+  --ctha-error: var(--error-color, #c62828);
+  --ctha-radius: 12px;
+
+  --ctha-comfort: #e0703c;
+  --ctha-eco: #3f9d7c;
+  --ctha-antifreeze: #4a7fbf;
+  --ctha-inherit: color-mix(in srgb, var(--ctha-muted) 22%, transparent);
+
+  display: block;
+  height: 100%;
+  color: var(--ctha-text);
+  font-family: var(--paper-font-body1_-_font-family, Roboto, system-ui, sans-serif);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.ctha-root {
+  min-height: 100%;
+  background: var(--ctha-bg);
+  padding: 16px;
+}
+
+.layout {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* --- Intestazione --------------------------------------------------------- */
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--ctha-card);
+  border-radius: 999px;
+  padding: 4px;
+  border: 1px solid var(--ctha-divider);
+}
+
+.tab {
+  border: 0;
+  background: transparent;
+  color: var(--ctha-muted);
+  font: inherit;
+  font-size: 14px;
+  padding: 7px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.tab[aria-selected="true"] {
+  background: var(--ctha-accent);
+  color: #fff;
+}
+
+.scenario-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* --- Blocchi -------------------------------------------------------------- */
+
+.card {
+  background: var(--ctha-card);
+  border: 1px solid var(--ctha-divider);
+  border-radius: var(--ctha-radius);
+  padding: 16px;
+}
+
+.card + .card {
+  margin-top: 16px;
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hint {
+  margin: 0;
+  color: var(--ctha-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.error {
+  background: color-mix(in srgb, var(--ctha-error) 12%, var(--ctha-card));
+  border: 1px solid var(--ctha-error);
+  color: var(--ctha-error);
+  border-radius: var(--ctha-radius);
+  padding: 10px 14px;
+  font-size: 14px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* --- Controlli ------------------------------------------------------------ */
+
+button,
+select,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+.btn {
+  border: 1px solid var(--ctha-divider);
+  background: var(--ctha-card);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--ctha-accent);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn.primary {
+  background: var(--ctha-accent);
+  border-color: var(--ctha-accent);
+  color: #fff;
+}
+
+.btn.danger {
+  color: var(--ctha-error);
+  border-color: color-mix(in srgb, var(--ctha-error) 40%, var(--ctha-divider));
+}
+
+.btn.small {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+select,
+input[type="text"],
+input[type="number"] {
+  background: var(--ctha-card);
+  border: 1px solid var(--ctha-divider);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 14px;
+}
+
+input[type="number"] {
+  width: 90px;
+}
+
+label.field {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ctha-muted);
+}
+
+/* --- Pennelli ------------------------------------------------------------- */
+
+.brushes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.brush {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--ctha-divider);
+  background: var(--ctha-card);
+  border-radius: 999px;
+  padding: 6px 14px 6px 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.brush[aria-pressed="true"] {
+  border-color: var(--ctha-accent);
+  box-shadow: 0 0 0 1px var(--ctha-accent) inset;
+}
+
+.swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  display: inline-block;
+}
+
+.swatch.comfort {
+  background: var(--ctha-comfort);
+}
+
+.swatch.eco {
+  background: var(--ctha-eco);
+}
+
+.swatch.antifreeze {
+  background: var(--ctha-antifreeze);
+}
+
+.swatch.inherit {
+  background: var(--ctha-inherit);
+  border: 1px dashed var(--ctha-muted);
+}
+
+/* --- Griglia -------------------------------------------------------------- */
+
+.grid-scroll {
+  overflow-x: auto;
+}
+
+.grid {
+  min-width: 640px;
+  display: grid;
+  grid-template-columns: minmax(150px, 200px) 1fr;
+  gap: 4px 8px;
+  align-items: center;
+  touch-action: pan-y;
+}
+
+.hours {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  font-size: 11px;
+  color: var(--ctha-muted);
+  padding-bottom: 2px;
+}
+
+.hours span {
+  border-left: 1px solid var(--ctha-divider);
+  padding-left: 3px;
+}
+
+.day-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.day-label .day {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.day-label .template {
+  color: var(--ctha-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 1px 7px;
+  background: color-mix(in srgb, var(--ctha-accent) 14%, transparent);
+  color: var(--ctha-accent);
+  border: 1px solid color-mix(in srgb, var(--ctha-accent) 35%, transparent);
+}
+
+.badge.plain {
+  background: color-mix(in srgb, var(--ctha-muted) 14%, transparent);
+  color: var(--ctha-muted);
+  border-color: var(--ctha-divider);
+}
+
+.row-cells {
+  display: grid;
+  grid-template-columns: repeat(48, 1fr);
+  height: 34px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--ctha-divider);
+  cursor: crosshair;
+  user-select: none;
+  touch-action: none;
+}
+
+.row-cells.empty {
+  cursor: not-allowed;
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 6px,
+    var(--ctha-inherit) 6px,
+    var(--ctha-inherit) 12px
+  );
+}
+
+.cell {
+  border-right: 1px solid color-mix(in srgb, var(--ctha-bg) 55%, transparent);
+}
+
+.cell.hour {
+  border-right-color: color-mix(in srgb, var(--ctha-text) 18%, transparent);
+}
+
+.cell:last-child {
+  border-right: 0;
+}
+
+.cell.comfort {
+  background: var(--ctha-comfort);
+}
+
+.cell.eco {
+  background: var(--ctha-eco);
+}
+
+.cell.antifreeze {
+  background: var(--ctha-antifreeze);
+}
+
+.cell.inherit {
+  background: var(--ctha-inherit);
+}
+
+.cell.painting {
+  filter: brightness(1.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+}
+
+.legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--ctha-muted);
+  margin-top: 12px;
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* --- Tabelle -------------------------------------------------------------- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--ctha-divider);
+  vertical-align: middle;
+}
+
+th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ctha-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+tr:last-child td {
+  border-bottom: 0;
+}
+
+.inherited input {
+  color: var(--ctha-muted);
+  border-style: dashed;
+}
+
+.cell-stack {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* --- Elenchi -------------------------------------------------------------- */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.item {
+  border: 1px solid var(--ctha-divider);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+}
+
+.item-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.preview {
+  display: grid;
+  grid-template-columns: repeat(48, 1fr);
+  height: 10px;
+  width: 100%;
+  min-width: 200px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.zones {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.zone {
+  border: 1px solid var(--ctha-divider);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.zone-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.reading {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.row .k {
+  color: var(--ctha-muted);
+}
+
+/* --- Dialogo -------------------------------------------------------------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 10;
+}
+
+.dialog {
+  background: var(--ctha-card);
+  border-radius: var(--ctha-radius);
+  padding: 20px;
+  max-width: 460px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.loading {
+  padding: 48px;
+  text-align: center;
+  color: var(--ctha-muted);
+}

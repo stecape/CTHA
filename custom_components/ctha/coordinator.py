@@ -53,6 +53,7 @@ class CthaCoordinator(DataUpdateCoordinator[CthaData]):
         self._writers: dict[str, ZoneWriter] = {}
         self._unsubscribers: list[Callable[[], None]] = []
         self._apply_unsubscribe: Callable[[], None] | None = None
+        self.entity_ids: dict[str, str] = {}
         self.overrides = OverrideManager(store.data)
 
     async def _async_update_data(self) -> CthaData:
@@ -109,6 +110,22 @@ class CthaCoordinator(DataUpdateCoordinator[CthaData]):
         @callback
         def _unregister() -> None:
             self._writers.pop(zone_id, None)
+
+        return _unregister
+
+    @callback
+    def register_entity(self, zone_id: str, entity_id: str) -> Callable[[], None]:
+        """Ricorda quale entità rappresenta la zona.
+
+        Serve al pannello: la temperatura misurata sta nello stato dell'entità
+        climate, non nel modello, e senza questa corrispondenza il frontend non
+        saprebbe quale entità leggere per una zona.
+        """
+        self.entity_ids[zone_id] = entity_id
+
+        @callback
+        def _unregister() -> None:
+            self.entity_ids.pop(zone_id, None)
 
         return _unregister
 

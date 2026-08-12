@@ -6,10 +6,11 @@ con override temporanei e riconciliazione periodica dei setpoint.
 
 ## Stato
 
-In sviluppo. Il backend — modello dati, risoluzione del setpoint, override,
-persistenza, servizi di lettura e scrittura del programma — è implementato;
-l'interfaccia di programmazione non esiste ancora (vedi [Roadmap](#roadmap)).
-Nel frattempo il programma si costruisce interamente dai servizi.
+In sviluppo. Backend e interfaccia di programmazione ci sono: modello dati,
+risoluzione del setpoint, override, persistenza, servizi e un pannello React in
+sidebar con la griglia settimanale. Manca l'adattatore BTicino/MyHOME, quindi
+l'attuazione avviene ancora a isteresi su un attuatore generico (vedi
+[Roadmap](#roadmap)).
 
 ## Come funziona
 
@@ -40,6 +41,8 @@ scritture di 1.5 s fra una zona e l'altra per non saturare il bus.
 
 ## Funzionalità
 
+- Pannello in sidebar con griglia settimanale a 48 mezz'ore e pennellata a
+  trascinamento
 - Entità `climate` per zona, configurabile dalla UI senza YAML
 - Programma settimanale a scenari con template riutilizzabili
 - Livelli `comfort`, `eco`, `antifreeze` con ereditarietà zona → globale
@@ -78,6 +81,25 @@ isteresi (default 0.3 °C) si regolano poi da *Configura*.
 
 Al primo avvio viene creato un programma di default: notte in eco, risveglio e
 sera in comfort, uguale per tutti i giorni.
+
+## Il pannello
+
+Con la prima zona compare **Cronotermostato** nella sidebar (solo per gli
+amministratori). Tre viste, che ricalcano l'architettura:
+
+- **Programma** — l'asse temporale. Sette righe da 48 mezz'ore: si sceglie un
+  pennello (comfort, eco, antigelo, eredita) e si trascina. Sotto, l'elenco
+  delle giornate e settimane tipo con *chi le usa*.
+- **Temperature** — l'asse termico. Setpoint globali, eccezioni per zona (un
+  campo vuoto eredita e mostra in grigio il valore ereditato) e scenari con i
+  loro offset.
+- **Zone** — lo stato adesso: temperatura misurata, setpoint applicato, da dove
+  viene, e l'eventuale override con la sua scadenza.
+
+**Le giornate tipo sono condivise.** Una riga marcata *condivisa* usa lo stesso
+template di altri giorni: dipingerla li cambia tutti. Il pannello se ne accorge
+e chiede cosa fare — modificare per tutti, oppure scollegare quel giorno su una
+copia indipendente.
 
 ## Servizi
 
@@ -192,18 +214,24 @@ custom_components/ctha/
 ├── coordinator.py    # runtime: programma, override, watchdog
 ├── models.py         # modello dati serializzabile
 ├── override.py       # policy di scadenza e soppressione echo
+├── panel.py          # registrazione del pannello e del percorso statico
 ├── program.py        # funzioni pure di modifica del programma
 ├── resolve.py        # funzioni pure di risoluzione del setpoint
 ├── services.py       # registrazione dei servizi
 ├── store.py          # persistenza via Store helper
+├── websocket.py      # API di lettura con push per il pannello
+├── frontend/         # bundle compilato del pannello (versionato)
 ├── manifest.json     # metadati dell'integrazione
 ├── services.yaml     # schema dei servizi
 ├── strings.json      # stringhe UI sorgente
 └── translations/     # it, en
+frontend/             # sorgenti React + Vite del pannello
 tests/                # suite sul nucleo puro, non serve Home Assistant
 ```
 
 ## Sviluppo
+
+### Backend
 
 `const.py`, `models.py`, `resolve.py`, `override.py` e `program.py` non
 importano `homeassistant`: sono verificabili senza far girare HA.
@@ -214,10 +242,24 @@ python -m venv .venv
 .venv/Scripts/python -m pytest
 ```
 
+### Frontend
+
+Il pannello è React impacchettato come Web Component. Il bundle compilato è
+versionato in `custom_components/ctha/frontend/`: HACS distribuisce il
+repository così com'è, quindi va ricompilato e committato a ogni modifica dei
+sorgenti.
+
+```bash
+cd frontend
+npm install
+npm run check     # tsc + vite build + prova di accensione in jsdom
+npm run watch     # ricompila a ogni salvataggio
+```
+
 ## Roadmap
 
-- [ ] Pannello React in sidebar per la griglia di programmazione (paint-drag)
-- [ ] Vista delle dipendenze "chi usa questo template" nell'interfaccia
+- [x] Pannello React in sidebar per la griglia di programmazione (paint-drag)
+- [x] Vista delle dipendenze "chi usa questo template" nell'interfaccia
 - [ ] Adattatore MyHOME/BTicino: scrittura setpoint e lettura offset manopola
 - [ ] Appiattimento del programma dell'unità centrale 3550
 - [ ] Durata minima di ciclo per proteggere la caldaia
