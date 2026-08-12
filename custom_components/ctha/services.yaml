@@ -35,3 +35,186 @@ clear_override:
       example: 01J8ZQ4P7K3W2X9Y
       selector:
         text:
+
+set_day_template:
+  fields:
+    template_id:
+      required: true
+      example: feriale
+      selector:
+        text:
+    name:
+      example: Giorno feriale
+      selector:
+        text:
+    slots:
+      example: "eeeeeeeeeeeecccccccccccccccccccccccccccccccccccc"
+      selector:
+        text:
+
+paint_slots:
+  fields:
+    template_id:
+      required: true
+      example: feriale
+      selector:
+        text:
+    start_slot:
+      required: true
+      example: 14
+      selector:
+        number:
+          min: 0
+          max: 47
+          mode: box
+    end_slot:
+      example: 19
+      selector:
+        number:
+          min: 0
+          max: 47
+          mode: box
+    level:
+      example: comfort
+      selector:
+        select:
+          options:
+            - comfort
+            - eco
+            - antifreeze
+
+duplicate_day_template:
+  fields:
+    template_id:
+      required: true
+      example: feriale
+      selector:
+        text:
+    new_id:
+      example: feriale_smartworking
+      selector:
+        text:
+    name:
+      example: Feriale (smart working)
+      selector:
+        text:
+    week_template:
+      example: default
+      selector:
+        text:
+    days:
+      example: "[2, 4]"
+      selector:
+        object:
+
+delete_day_template:
+  fields:
+    template_id:
+      required: true
+      example: feriale
+      selector:
+        text:
+
+set_week_template:
+  fields:
+    template_id:
+      required: true
+      example: inverno
+      selector:
+        text:
+    name:
+      example: Settimana invernale
+      selector:
+        text:
+    days:
+      example: "{5: weekend, 6: weekend}"
+      selector:
+        object:
+
+delete_week_template:
+  fields:
+    template_id:
+      required: true
+      example: inverno
+      selector:
+        text:
+
+set_scenario:
+  fields:
+    scenario_id:
+      required: true
+      example: vacanza
+      selector:
+        text:
+    name:
+      example: Vacanza
+      selector:
+        text:
+    week_template:
+      example: inverno
+      selector:
+        text:
+    offset:
+      example: -3
+      selector:
+        number:
+          min: -10
+          max: 10
+          step: 0.5
+          unit_of_measurement: "°C"
+    zone_offsets:
+      example: "{01J8ZQ4P7K3W2X9Y: 1.5}"
+      selector:
+        object:
+
+delete_scenario:
+  fields:
+    scenario_id:
+      required: true
+      example: vacanza
+      selector:
+        text:
+
+activate_scenario:
+  fields:
+    scenario_id:
+      required: true
+      example: vacanza
+      selector:
+        text:
+
+set_setpoint:
+  fields:
+    level:
+      required: true
+      example: comfort
+      selector:
+        select:
+          options:
+            - comfort
+            - eco
+            - antifreeze
+    temperature:
+      example: 21.5
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 0.5
+          unit_of_measurement: "°C"
+    zone_id:
+      example: 01J8ZQ4P7K3W2X9Y
+      selector:
+        text:
+
+set_zone_week_template:
+  fields:
+    zone_id:
+      required: true
+      example: 01J8ZQ4P7K3W2X9Y
+      selector:
+        text:
+    template_id:
+      example: inverno
+      selector:
+        text:

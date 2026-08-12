@@ -58,6 +58,188 @@
           "description": "Zone identifier (matches the config entry)."
         }
       }
+    },
+    "set_day_template": {
+      "name": "Set day template",
+      "description": "Create a day template, or update its name and slots. Omitted fields are left untouched.",
+      "fields": {
+        "template_id": {
+          "name": "Identifier",
+          "description": "Day template id: it is created if it does not exist."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Name shown in the interface."
+        },
+        "slots": {
+          "name": "Slots",
+          "description": "48 characters, one every 30 minutes from midnight: c = comfort, e = eco, a = antifreeze, - = inherit from global."
+        }
+      }
+    },
+    "paint_slots": {
+      "name": "Paint slots",
+      "description": "Assign a level to a range of slots in a day template, both ends included.",
+      "fields": {
+        "template_id": {
+          "name": "Day template",
+          "description": "Id of the day template to edit."
+        },
+        "start_slot": {
+          "name": "First slot",
+          "description": "First slot to paint: 0 is midnight, 47 is 23:30."
+        },
+        "end_slot": {
+          "name": "Last slot",
+          "description": "Last slot to paint, included. If omitted only the first slot is painted."
+        },
+        "level": {
+          "name": "Level",
+          "description": "Level to assign. If omitted the slots go back to inheriting from global."
+        }
+      }
+    },
+    "duplicate_day_template": {
+      "name": "Duplicate day template",
+      "description": "Copy a day template and, on request, point the given days at the copy: this is how a single day is differentiated without changing the template for everyone using it.",
+      "fields": {
+        "template_id": {
+          "name": "Day template",
+          "description": "Id of the day template to copy."
+        },
+        "new_id": {
+          "name": "Copy id",
+          "description": "Id for the copy. One is generated if omitted."
+        },
+        "name": {
+          "name": "Copy name",
+          "description": "Name for the copy. Defaults to the original's name with \"(copia)\" appended."
+        },
+        "week_template": {
+          "name": "Week template",
+          "description": "Week template whose days should be pointed at the copy. If omitted the copy is left unlinked."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days to re-point, with 0 = Monday. If omitted, every day of that week using the original is moved."
+        }
+      }
+    },
+    "delete_day_template": {
+      "name": "Delete day template",
+      "description": "Delete a day template. Fails if a week template is still using it.",
+      "fields": {
+        "template_id": {
+          "name": "Day template",
+          "description": "Id of the day template to delete."
+        }
+      }
+    },
+    "set_week_template": {
+      "name": "Set week template",
+      "description": "Create a week template, or update its name and day assignments. The given days are merged into the existing ones.",
+      "fields": {
+        "template_id": {
+          "name": "Identifier",
+          "description": "Week template id: it is created if it does not exist."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Name shown in the interface."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Map of day → day template, with 0 = Monday. An empty value leaves the day unassigned."
+        }
+      }
+    },
+    "delete_week_template": {
+      "name": "Delete week template",
+      "description": "Delete a week template. Fails if a scenario or a zone is still following it.",
+      "fields": {
+        "template_id": {
+          "name": "Week template",
+          "description": "Id of the week template to delete."
+        }
+      }
+    },
+    "set_scenario": {
+      "name": "Set scenario",
+      "description": "Create a scenario, or update its name, week template and thermal offsets.",
+      "fields": {
+        "scenario_id": {
+          "name": "Identifier",
+          "description": "Scenario id: it is created if it does not exist."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Name shown in the interface."
+        },
+        "week_template": {
+          "name": "Week template",
+          "description": "Week template the scenario follows."
+        },
+        "offset": {
+          "name": "Offset",
+          "description": "Shift applied to every temperature of the scenario."
+        },
+        "zone_offsets": {
+          "name": "Per-zone offsets",
+          "description": "Map of zone → offset, for the zones that differ. An empty value removes the exception."
+        }
+      }
+    },
+    "delete_scenario": {
+      "name": "Delete scenario",
+      "description": "Delete a scenario. Neither the active one nor the last remaining one can be deleted.",
+      "fields": {
+        "scenario_id": {
+          "name": "Scenario",
+          "description": "Id of the scenario to delete."
+        }
+      }
+    },
+    "activate_scenario": {
+      "name": "Activate scenario",
+      "description": "Make a scenario active; overrides tied to the previous one lapse.",
+      "fields": {
+        "scenario_id": {
+          "name": "Scenario",
+          "description": "Id of the scenario to activate."
+        }
+      }
+    },
+    "set_setpoint": {
+      "name": "Set setpoint",
+      "description": "Set the temperature of a level, globally or for a single zone.",
+      "fields": {
+        "level": {
+          "name": "Level",
+          "description": "Level to set: comfort, eco or antifreeze."
+        },
+        "temperature": {
+          "name": "Temperature",
+          "description": "Temperature for the level. Leaving it empty makes the zone inherit from the global setpoint again; the global setpoint cannot be empty."
+        },
+        "zone_id": {
+          "name": "Zone",
+          "description": "Zone to edit. If omitted the global setpoint is changed."
+        }
+      }
+    },
+    "set_zone_week_template": {
+      "name": "Zone schedule",
+      "description": "Give a zone a week template of its own, or send it back to following the scenario's one.",
+      "fields": {
+        "zone_id": {
+          "name": "Zone",
+          "description": "Zone identifier (matches the config entry)."
+        },
+        "template_id": {
+          "name": "Week template",
+          "description": "Week template to assign to the zone. If omitted the zone goes back to following the scenario."
+        }
+      }
     }
   }
 }

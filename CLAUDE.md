@@ -20,11 +20,11 @@ termostati fisici e dall'unità centrale.
 **Nota sullo stato del codice**: il backend dell'architettura target è
 implementato in `custom_components/ctha/` — modello dati a riferimenti,
 risoluzione su due assi, override con soppressione echo, persistenza su Store,
-watchdog di riconciliazione e servizi. Restano fuori dal codice il frontend
-React e l'adattatore specifico BTicino/MyHOME: l'attuazione avviene ancora
-tramite isteresi su un attuatore generico (`switch`, `input_boolean` o
-`climate`), che è il punto in cui si innesterà la scrittura dei setpoint sul
-bus OpenWebNet.
+watchdog di riconciliazione, modifica del programma e servizi. Restano fuori
+dal codice il frontend React e l'adattatore specifico BTicino/MyHOME:
+l'attuazione avviene ancora tramite isteresi su un attuatore generico
+(`switch`, `input_boolean` o `climate`), che è il punto in cui si innesterà la
+scrittura dei setpoint sul bus OpenWebNet.
 
 Dominio dell'integrazione: `ctha`. Tipo: `helper`, `iot_class: local_push`.
 
@@ -39,24 +39,29 @@ custom_components/ctha/
 ├── coordinator.py     # CthaCoordinator: programma, override, watchdog
 ├── models.py          # dataclass del modello dati, serializzabili nello Store
 ├── override.py        # OverrideManager: policy di scadenza e soppressione echo
+├── program.py         # funzioni pure di modifica: template, scenari, setpoint
 ├── resolve.py         # funzioni pure: slot, livelli, resolve_setpoint
-├── services.py        # servizi set_override / clear_override
+├── services.py        # registrazione dei 13 servizi del dominio
 ├── store.py           # CthaStore: persistenza via Store helper
 ├── manifest.json      # metadati dell'integrazione (versione, requisiti, HA minimo)
 ├── services.yaml      # schema dei servizi per la UI
 ├── strings.json       # stringhe UI sorgente per config/options flow e servizi
 └── translations/      # it.json, en.json — tenute sincronizzate con strings.json
+tests/                   # suite pytest sul nucleo puro (conftest.py + un file per modulo)
+pytest.ini               # testpaths = tests
+requirements_test.txt    # solo pytest: la suite non ha bisogno di HA
 hacs.json                # metadati per la distribuzione via HACS
 README.md                # documentazione utente (installazione, config, roadmap)
 ```
 
-`resolve.py`, `models.py` e `override.py` non importano `homeassistant`: sono
-logica pura, testabile senza far girare HA. Tenerli così è deliberato — è
-l'unica parte del componente verificabile a costo zero.
+`const.py`, `models.py`, `resolve.py`, `override.py` e `program.py` non
+importano `homeassistant`: sono logica pura, testabile senza far girare HA.
+Tenerli così è deliberato — è la parte del componente verificabile a costo
+zero, e infatti è l'unica coperta da test.
 
-Non esistono ancora test automatici né una config di sviluppo Home Assistant
-nel repo (vedi Roadmap: `pytest-homeassistant-custom-component` è previsto ma
-non presente).
+Non esiste ancora una config di sviluppo Home Assistant nel repo, né test sulla
+parte che tocca HA (vedi Roadmap: `pytest-homeassistant-custom-component` è
+previsto ma non presente).
 
 ## Architettura
 
@@ -86,10 +91,23 @@ unico bus.
   riconosce le eco delle nostre scritture (`note_write` / `is_echo`) e applica
   le scadenze (`is_expired`, `purge_expired`). Gli override `hardware` non
   scadono mai: nessun comando software può annullarli.
+- **`program.py`**: le modifiche al programma, sempre come funzioni pure sul
+  modello. Fa rispettare due regole: non si cita ciò che non esiste, e non si
+  elimina ciò che è ancora citato — con `Usage` che dice *chi* sta usando
+  l'elemento (la stessa informazione della futura vista delle dipendenze). Le
+  operazioni che toccano più elementi validano tutto prima di mutare qualcosa,
+  perché una modifica rifiutata a metà finirebbe comunque nello Store al
+  salvataggio successivo. La scappatoia "duplica e scollega" è
+  `duplicate_day_template`.
 - **`coordinator.py`**: `CthaCoordinator` espone `target_for` (override se
   presente, altrimenti programma) e applica i setpoint tramite writer
   registrati dalle entità. Due timer: uno a ogni confine di slot (00 e 30),
-  uno ogni `RECONCILE_INTERVAL` per il watchdog.
+  uno ogni `RECONCILE_INTERVAL` per il watchdog. `async_edit` è l'unico
+  ingresso per le modifiche al programma: esegue l'operazione di `program.py`,
+  persiste e programma la riscrittura delle zone. La riscrittura è debounced
+  (`APPLY_DEBOUNCE_SECONDS`) perché una griglia dipinta col mouse produce
+  decine di modifiche e ogni riscrittura completa occupa il bus per 1.5 s per
+  zona.
 - **`CthaThermostat` (climate.py)**: entità di zona.
   - Estende `CoordinatorEntity` + `ClimateEntity` + `RestoreEntity`.
   - Non decide più il setpoint: lo riceve dal coordinator tramite il writer
@@ -119,22 +137,35 @@ stringhe sparse nel codice.
   commenti inline solo se il codice non è auto-esplicativo).
 - Le stringhe UI vanno aggiunte sia in `strings.json` sia in
   `translations/it.json` e `translations/en.json`, mantenendo le chiavi
-  allineate.
+  allineate. Un servizio nuovo tocca cinque punti: `const.py` (nome e attributi),
+  `services.py` (schema e handler), `services.yaml` (selettori), `strings.json`
+  e le due traduzioni.
 - Bump di `version` in `manifest.json` quando si rilascia una modifica
   utente-visibile (HACS legge questo campo).
 
 ## Sviluppo e test
 
-Non c'è ancora un ambiente HA di sviluppo né una suite di test nel repo.
-Per validare modifiche manualmente:
+La suite copre il nucleo puro e gira senza Home Assistant:
+
+```bash
+python -m venv .venv
+.venv/Scripts/pip install -r requirements_test.txt
+.venv/Scripts/python -m pytest
+```
+
+`tests/conftest.py` registra `ctha` in `sys.modules` come package fittizio con
+il solo `__path__`: è ciò che permette di importare `ctha.models` senza
+eseguire l'`__init__.py` vero, che importerebbe `homeassistant`. Un modulo
+nuovo è testabile qui **solo se non importa HA**; se lo importa, il suo test
+va rimandato a `pytest-homeassistant-custom-component`.
+
+Non c'è ancora un ambiente HA di sviluppo nel repo. Per validare a mano le
+parti che toccano HA:
 
 1. Copiare/linkare `custom_components/ctha` in
    `<config_home_assistant>/custom_components/`.
 2. Riavviare Home Assistant e aggiungere l'integrazione da
    *Impostazioni → Dispositivi e servizi*.
-
-Quando si aggiunge una suite di test (roadmap), usare
-`pytest-homeassistant-custom-component` come indicato nel README.
 
 ## Architettura target — cosa è già in codice
 
@@ -171,19 +202,23 @@ progressive. Stato attuale di ciascun pezzo:
   = 12 min, scritture scaglionate di `WRITE_STAGGER_SECONDS` = 1.5 s).
   L'appiattimento del programma settimanale della 3550 stessa è *da fare* e
   richiede l'adattatore MyHOME.
-- **Servizi HA** — *fatti*: `ctha.set_override` e `ctha.clear_override`.
-  Attenzione: il nome storico in progettazione era `termo_zone.*`, ma il
-  dominio dell'integrazione è `ctha` e i servizi devono starci dentro.
+- **Servizi HA** — *fatti*: 13 servizi, elencati nel README. Oltre agli
+  override coprono giornate tipo (`set_day_template`, `paint_slots`,
+  `duplicate_day_template`, `delete_day_template`), settimane tipo, scenari e
+  setpoint. Attenzione: il nome storico in progettazione era `termo_zone.*`, ma
+  il dominio dell'integrazione è `ctha` e i servizi devono starci dentro.
+  `paint_slots` prende un intervallo e non uno slot proprio perché è la
+  primitiva su cui poggerà il paint-drag della griglia.
 
 ## Prossimi passi
 
-- Costruire la griglia UI di programmazione con interazione paint-drag
+- Costruire la griglia UI di programmazione con interazione paint-drag, sopra i
+  servizi già esistenti
 - Funzionalità UI da implementare: visualizzazione dei valori ereditati con
   la relativa fonte (già esposta negli attributi dell'entità come
-  `setpoint_source`), vista delle dipendenze "chi usa questo template" e una
-  scappatoia "duplica e scollega" per i template
-- Servizi per creare e modificare scenari e template dalle automazioni: oggi
-  il modello si può leggere ma non editare senza frontend
+  `setpoint_source`) e vista delle dipendenze "chi usa questo template"
+  (i dati arrivano da `program.day_template_usages` e
+  `program.week_template_usages`)
 - Adattatore MyHOME/BTicino: scrittura dei setpoint sul bus al posto
   dell'isteresi generica, e lettura dei messaggi di offset locale per
   registrare gli override `hardware`
@@ -191,8 +226,9 @@ progressive. Stato attuale di ciascun pezzo:
   poiché il progetto upstream è di fatto non mantenuto dall'inizio del 2024
 - Durata minima di ciclo per proteggere la caldaia (`CONF_MIN_CYCLE_DURATION`
   è definita in `const.py` ma non ancora usata in `climate.py`)
-- Test con `pytest-homeassistant-custom-component` per la parte che tocca HA;
-  il nucleo puro è già verificabile senza
+- Test con `pytest-homeassistant-custom-component` per la parte che tocca HA:
+  coordinator, entità climate, registrazione dei servizi. Il nucleo puro è già
+  coperto da `tests/`
 
 ## Apprendimenti e principi chiave
 

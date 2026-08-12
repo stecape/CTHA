@@ -1,0 +1,3 @@
+# Dipendenze per la suite sul nucleo puro (const, models, resolve, override,
+# program): non serve Home Assistant, vedi tests/conftest.py.
+pytest>=8.0

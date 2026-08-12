@@ -58,6 +58,188 @@
           "description": "Identificatore della zona (corrisponde alla config entry)."
         }
       }
+    },
+    "set_day_template": {
+      "name": "Imposta giornata tipo",
+      "description": "Crea una giornata tipo o ne aggiorna nome e slot. I campi omessi restano invariati.",
+      "fields": {
+        "template_id": {
+          "name": "Identificatore",
+          "description": "Id della giornata tipo: se non esiste viene creata."
+        },
+        "name": {
+          "name": "Nome",
+          "description": "Nome mostrato nell'interfaccia."
+        },
+        "slots": {
+          "name": "Slot",
+          "description": "48 caratteri, uno ogni 30 minuti dalla mezzanotte: c = comfort, e = eco, a = antigelo, - = eredita dal globale."
+        }
+      }
+    },
+    "paint_slots": {
+      "name": "Dipingi slot",
+      "description": "Assegna un livello a un intervallo di slot di una giornata tipo, estremi inclusi.",
+      "fields": {
+        "template_id": {
+          "name": "Giornata tipo",
+          "description": "Id della giornata tipo da modificare."
+        },
+        "start_slot": {
+          "name": "Slot iniziale",
+          "description": "Primo slot da dipingere: 0 è la mezzanotte, 47 le 23:30."
+        },
+        "end_slot": {
+          "name": "Slot finale",
+          "description": "Ultimo slot da dipingere, incluso. Se omesso si dipinge solo lo slot iniziale."
+        },
+        "level": {
+          "name": "Livello",
+          "description": "Livello da assegnare. Se omesso gli slot tornano a ereditare dal globale."
+        }
+      }
+    },
+    "duplicate_day_template": {
+      "name": "Duplica giornata tipo",
+      "description": "Copia una giornata tipo e, se richiesto, aggancia alla copia i giorni indicati: serve a differenziare un giorno senza modificare il template per tutti quelli che lo usano.",
+      "fields": {
+        "template_id": {
+          "name": "Giornata tipo",
+          "description": "Id della giornata tipo da copiare."
+        },
+        "new_id": {
+          "name": "Id della copia",
+          "description": "Id da assegnare alla copia. Se omesso ne viene generato uno."
+        },
+        "name": {
+          "name": "Nome della copia",
+          "description": "Nome della copia. Se omesso si usa quello dell'originale con l'aggiunta di \"(copia)\"."
+        },
+        "week_template": {
+          "name": "Settimana tipo",
+          "description": "Settimana in cui riagganciare i giorni alla copia. Se omessa la copia resta scollegata."
+        },
+        "days": {
+          "name": "Giorni",
+          "description": "Giorni da riagganciare, con 0 = lunedì. Se omessi si spostano tutti i giorni che in quella settimana usavano l'originale."
+        }
+      }
+    },
+    "delete_day_template": {
+      "name": "Elimina giornata tipo",
+      "description": "Elimina una giornata tipo. L'operazione fallisce se una settimana tipo la sta ancora usando.",
+      "fields": {
+        "template_id": {
+          "name": "Giornata tipo",
+          "description": "Id della giornata tipo da eliminare."
+        }
+      }
+    },
+    "set_week_template": {
+      "name": "Imposta settimana tipo",
+      "description": "Crea una settimana tipo o ne aggiorna nome e assegnazioni. I giorni indicati si fondono con quelli esistenti.",
+      "fields": {
+        "template_id": {
+          "name": "Identificatore",
+          "description": "Id della settimana tipo: se non esiste viene creata."
+        },
+        "name": {
+          "name": "Nome",
+          "description": "Nome mostrato nell'interfaccia."
+        },
+        "days": {
+          "name": "Giorni",
+          "description": "Mappa giorno → giornata tipo, con 0 = lunedì. Un valore vuoto lascia il giorno scoperto."
+        }
+      }
+    },
+    "delete_week_template": {
+      "name": "Elimina settimana tipo",
+      "description": "Elimina una settimana tipo. L'operazione fallisce se uno scenario o una zona la stanno ancora seguendo.",
+      "fields": {
+        "template_id": {
+          "name": "Settimana tipo",
+          "description": "Id della settimana tipo da eliminare."
+        }
+      }
+    },
+    "set_scenario": {
+      "name": "Imposta scenario",
+      "description": "Crea uno scenario o ne aggiorna nome, settimana tipo e offset termici.",
+      "fields": {
+        "scenario_id": {
+          "name": "Identificatore",
+          "description": "Id dello scenario: se non esiste viene creato."
+        },
+        "name": {
+          "name": "Nome",
+          "description": "Nome mostrato nell'interfaccia."
+        },
+        "week_template": {
+          "name": "Settimana tipo",
+          "description": "Settimana tipo seguita dallo scenario."
+        },
+        "offset": {
+          "name": "Offset",
+          "description": "Scostamento applicato a tutte le temperature dello scenario."
+        },
+        "zone_offsets": {
+          "name": "Offset per zona",
+          "description": "Mappa zona → offset, per le zone che fanno eccezione. Un valore vuoto rimuove l'eccezione."
+        }
+      }
+    },
+    "delete_scenario": {
+      "name": "Elimina scenario",
+      "description": "Elimina uno scenario. Non si possono eliminare lo scenario attivo né l'ultimo rimasto.",
+      "fields": {
+        "scenario_id": {
+          "name": "Scenario",
+          "description": "Id dello scenario da eliminare."
+        }
+      }
+    },
+    "activate_scenario": {
+      "name": "Attiva scenario",
+      "description": "Rende attivo uno scenario; gli override legati al precedente decadono.",
+      "fields": {
+        "scenario_id": {
+          "name": "Scenario",
+          "description": "Id dello scenario da attivare."
+        }
+      }
+    },
+    "set_setpoint": {
+      "name": "Imposta setpoint",
+      "description": "Imposta la temperatura di un livello, globalmente o per una singola zona.",
+      "fields": {
+        "level": {
+          "name": "Livello",
+          "description": "Livello da impostare: comfort, eco o antigelo."
+        },
+        "temperature": {
+          "name": "Temperatura",
+          "description": "Temperatura del livello. Lasciandola vuota la zona torna a ereditare dal setpoint globale; il setpoint globale non può essere vuoto."
+        },
+        "zone_id": {
+          "name": "Zona",
+          "description": "Zona da modificare. Se omessa si modifica il setpoint globale."
+        }
+      }
+    },
+    "set_zone_week_template": {
+      "name": "Programma di zona",
+      "description": "Dà a una zona una settimana tipo tutta sua, o la riporta a seguire quella dello scenario.",
+      "fields": {
+        "zone_id": {
+          "name": "Zona",
+          "description": "Identificatore della zona (corrisponde alla config entry)."
+        },
+        "template_id": {
+          "name": "Settimana tipo",
+          "description": "Settimana tipo da assegnare alla zona. Se omessa la zona torna a seguire lo scenario."
+        }
+      }
     }
   }
 }

@@ -29,6 +29,8 @@ STORAGE_KEY: Final = f"{DOMAIN}.data"
 SLOT_MINUTES: Final = 30
 SLOTS_PER_DAY: Final = 48
 
+DAYS_PER_WEEK: Final = 7
+
 # Carattere che rappresenta esplicitamente l'ereditarietà dal livello globale:
 # nel modello dati corrisponde a `null`, nella stringa a questo segnaposto.
 INHERIT_CHAR: Final = "-"
@@ -37,6 +39,8 @@ INHERIT_CHAR: Final = "-"
 LEVEL_COMFORT: Final = "comfort"
 LEVEL_ECO: Final = "eco"
 LEVEL_ANTIFREEZE: Final = "antifreeze"
+
+LEVELS: Final[tuple[str, ...]] = (LEVEL_COMFORT, LEVEL_ECO, LEVEL_ANTIFREEZE)
 
 # Mappa carattere del day template -> identificatore di livello.
 LEVEL_BY_CHAR: Final[dict[str, str]] = {
@@ -94,6 +98,12 @@ RECONCILE_INTERVAL: Final = timedelta(minutes=12)
 # Ritardo fra una scrittura di zona e la successiva, per non saturare il bus.
 WRITE_STAGGER_SECONDS: Final = 1.5
 
+# Le modifiche al programma arrivano a raffica (una griglia dipinta col mouse è
+# decine di chiamate): si aspetta la fine della raffica prima di riscrivere le
+# zone, perché ogni riscrittura completa occupa il bus per WRITE_STAGGER_SECONDS
+# per zona.
+APPLY_DEBOUNCE_SECONDS: Final = 5.0
+
 # --- Limiti del setpoint (°C) ----------------------------------------------
 MIN_TEMP: Final = 5.0
 MAX_TEMP: Final = 30.0
@@ -103,6 +113,30 @@ TEMP_STEP: Final = 0.5
 SERVICE_SET_OVERRIDE: Final = "set_override"
 SERVICE_CLEAR_OVERRIDE: Final = "clear_override"
 
+SERVICE_SET_DAY_TEMPLATE: Final = "set_day_template"
+SERVICE_PAINT_SLOTS: Final = "paint_slots"
+SERVICE_DUPLICATE_DAY_TEMPLATE: Final = "duplicate_day_template"
+SERVICE_DELETE_DAY_TEMPLATE: Final = "delete_day_template"
+SERVICE_SET_WEEK_TEMPLATE: Final = "set_week_template"
+SERVICE_DELETE_WEEK_TEMPLATE: Final = "delete_week_template"
+SERVICE_SET_SCENARIO: Final = "set_scenario"
+SERVICE_DELETE_SCENARIO: Final = "delete_scenario"
+SERVICE_ACTIVATE_SCENARIO: Final = "activate_scenario"
+SERVICE_SET_SETPOINT: Final = "set_setpoint"
+SERVICE_SET_ZONE_WEEK_TEMPLATE: Final = "set_zone_week_template"
+
 ATTR_ZONE_ID: Final = "zone_id"
 ATTR_POLICY: Final = "policy"
 ATTR_DURATION: Final = "duration"
+ATTR_TEMPLATE_ID: Final = "template_id"
+ATTR_NAME: Final = "name"
+ATTR_SLOTS: Final = "slots"
+ATTR_LEVEL: Final = "level"
+ATTR_START_SLOT: Final = "start_slot"
+ATTR_END_SLOT: Final = "end_slot"
+ATTR_DAYS: Final = "days"
+ATTR_NEW_ID: Final = "new_id"
+ATTR_SCENARIO_ID: Final = "scenario_id"
+ATTR_WEEK_TEMPLATE: Final = "week_template"
+ATTR_OFFSET: Final = "offset"
+ATTR_ZONE_OFFSETS: Final = "zone_offsets"

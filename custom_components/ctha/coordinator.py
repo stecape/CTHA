@@ -11,16 +11,20 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
+from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import (
+    async_call_later,
     async_track_time_change,
     async_track_time_interval,
 )
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
+from . import program
 from .const import (
+    APPLY_DEBOUNCE_SECONDS,
     DOMAIN,
     OVERRIDE_SOURCE_HA,
     POLICY_NEXT_SLOT,
@@ -36,6 +40,7 @@ from .store import CthaStore
 _LOGGER = logging.getLogger(__name__)
 
 ZoneWriter = Callable[[float], Awaitable[None]]
+ProgramEdit = Callable[[CthaData], Any]
 
 
 class CthaCoordinator(DataUpdateCoordinator[CthaData]):
@@ -47,6 +52,7 @@ class CthaCoordinator(DataUpdateCoordinator[CthaData]):
         self._store = store
         self._writers: dict[str, ZoneWriter] = {}
         self._unsubscribers: list[Callable[[], None]] = []
+        self._apply_unsubscribe: Callable[[], None] | None = None
         self.overrides = OverrideManager(store.data)
 
     async def _async_update_data(self) -> CthaData:
@@ -77,6 +83,9 @@ class CthaCoordinator(DataUpdateCoordinator[CthaData]):
         """Ferma i timer quando l'ultima entry viene rimossa."""
         while self._unsubscribers:
             self._unsubscribers.pop()()
+        if self._apply_unsubscribe is not None:
+            self._apply_unsubscribe()
+            self._apply_unsubscribe = None
         await super().async_shutdown()
 
     # --- Registrazione delle zone -------------------------------------------
@@ -137,6 +146,41 @@ class CthaCoordinator(DataUpdateCoordinator[CthaData]):
             except Exception:  # noqa: BLE001 - una zona non deve fermare le altre
                 _LOGGER.exception("Riconciliazione fallita per la zona %s", zone_id)
 
+    @callback
+    def async_schedule_apply(self) -> None:
+        """Riscrive tutte le zone a raffica finita.
+
+        Una riscrittura completa impegna il bus per `WRITE_STAGGER_SECONDS` per
+        zona: farla partire a ogni modifica renderebbe l'editing del programma
+        lento quanto il bus. Ogni nuova modifica rimanda l'attesa.
+        """
+        if self._apply_unsubscribe is not None:
+            self._apply_unsubscribe()
+        self._apply_unsubscribe = async_call_later(
+            self.hass, APPLY_DEBOUNCE_SECONDS, self._async_apply_pending
+        )
+
+    async def _async_apply_pending(self, now: datetime) -> None:
+        """Riscrittura differita richiesta da `async_schedule_apply`."""
+        self._apply_unsubscribe = None
+        await self.async_apply_all(now)
+
+    # --- Modifica del programma ---------------------------------------------
+
+    async def async_edit(self, edit: ProgramEdit) -> Any:
+        """Applica una modifica al programma, la persiste e riallinea le zone.
+
+        Le operazioni vivono in `program.py` come funzioni pure sul modello:
+        qui si aggiunge solo ciò che è di Home Assistant — persistenza,
+        riscrittura delle zone, notifica alle entità. Gli errori di `program`
+        risalgono al chiamante, che li traduce per l'utente.
+        """
+        result = edit(self.data)
+        self._store.async_schedule_save()
+        self.async_schedule_apply()
+        self.async_update_listeners()
+        return result
+
     # --- Override -----------------------------------------------------------
 
     async def async_set_override(
@@ -171,14 +215,12 @@ class CthaCoordinator(DataUpdateCoordinator[CthaData]):
 
     async def async_set_active_scenario(self, scenario_id: str) -> None:
         """Cambia scenario, facendo decadere gli override legati al precedente."""
-        if scenario_id not in self.data.scenarios:
-            raise ValueError(f"Scenario sconosciuto: {scenario_id}")
 
-        self.data.active_scenario = scenario_id
-        self.overrides.purge_expired(dt_util.now())
-        self._store.async_schedule_save()
-        await self.async_apply_all()
-        self.async_update_listeners()
+        def _edit(data: CthaData) -> None:
+            program.set_active_scenario(data, scenario_id)
+            self.overrides.purge_expired(dt_util.now())
+
+        await self.async_edit(_edit)
 
     # --- Timer --------------------------------------------------------------
 
