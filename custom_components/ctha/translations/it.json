@@ -3,27 +3,15 @@
     "step": {
       "user": {
         "title": "CTHA - Cronotermostato",
-        "description": "Scegli il sensore di temperatura e l'attuatore da comandare.",
+        "description": "Scegli il termostato che governa la zona: CTHA ne programmerà il setpoint. La regolazione resta al termostato.",
         "data": {
-          "name": "Nome",
-          "sensor_entity_id": "Sensore di temperatura",
-          "heater_entity_id": "Attuatore (caldaia / valvola)"
+          "name": "Nome della zona",
+          "target_entity_id": "Termostato della zona"
         }
       }
     },
     "abort": {
-      "already_configured": "Esiste già una zona per questo attuatore."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Isteresi",
-        "data": {
-          "cold_tolerance": "Tolleranza sotto il setpoint",
-          "hot_tolerance": "Tolleranza sopra il setpoint"
-        }
-      }
+      "already_configured": "Esiste già una zona per questo termostato."
     }
   },
   "services": {

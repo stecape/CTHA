@@ -8,17 +8,15 @@ from typing import Final
 DOMAIN: Final = "ctha"
 
 # --- Config entry -----------------------------------------------------------
-# La entry descrive il legame hardware di una zona; il programma settimanale
-# vive nello Store (vedi store.py), non nelle opzioni della entry.
-CONF_SENSOR: Final = "sensor_entity_id"
-CONF_HEATER: Final = "heater_entity_id"
-CONF_COLD_TOLERANCE: Final = "cold_tolerance"
-CONF_HOT_TOLERANCE: Final = "hot_tolerance"
-CONF_MIN_CYCLE_DURATION: Final = "min_cycle_duration"
+# La entry lega una zona al termostato che la governa: una entità `climate`
+# già esistente (per l'impianto BTicino, quella creata da MyHOME per la zona).
+# Il programma settimanale vive nello Store (vedi store.py), non nella entry.
+CONF_TARGET: Final = "target_entity_id"
 
-# Isteresi di default (°C)
-DEFAULT_COLD_TOLERANCE: Final = 0.3
-DEFAULT_HOT_TOLERANCE: Final = 0.3
+# Scostamento sotto il quale una riscrittura del setpoint è inutile. Il
+# watchdog gira ogni pochi minuti su tutte le zone: senza questa soglia
+# riscriverebbe sul bus valori già corretti, per sempre.
+WRITE_DEADBAND: Final = 0.05
 
 # --- Storage ----------------------------------------------------------------
 STORAGE_VERSION: Final = 1

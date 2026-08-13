@@ -4,12 +4,18 @@ Integrazione custom che aggiunge a Home Assistant un cronotermostato multi-zona:
 un programma settimanale a scenari decide quale temperatura tenere in ogni zona,
 con override temporanei e riconciliazione periodica dei setpoint.
 
+**CTHA non regola la temperatura: programma il setpoint.** Una zona è un
+termostato che già esiste in Home Assistant — per un impianto BTicino, l'F430/4
+esposto dall'integrazione MyHOME. Quel termostato misura già la temperatura e
+comanda già la valvola; quello che gli manca è *quale setpoint tenere e quando*,
+ed è l'unica cosa che CTHA gli fornisce.
+
 ## Stato
 
-In sviluppo. Backend e interfaccia di programmazione ci sono: modello dati,
-risoluzione del setpoint, override, persistenza, servizi e un pannello React in
-sidebar con la griglia settimanale. Manca l'adattatore BTicino/MyHOME, quindi
-l'attuazione avviene ancora a isteresi su un attuatore generico (vedi
+In sviluppo, ma completo nelle sue parti: modello dati, risoluzione del
+setpoint, override, persistenza, servizi, pannello React in sidebar e scrittura
+del setpoint sul termostato di zona. Manca il riconoscimento specifico degli
+offset dalla manopola fisica, che richiede l'adattatore MyHOME (vedi
 [Roadmap](#roadmap)).
 
 ## Come funziona
@@ -37,18 +43,25 @@ Politiche di scadenza disponibili: `next_slot`, `duration`,
 `until_scenario_change`, `sticky`.
 
 Un watchdog riscrive i setpoint desiderati ogni 12 minuti, scaglionando le
-scritture di 1.5 s fra una zona e l'altra per non saturare il bus.
+scritture di 1.5 s fra una zona e l'altra per non saturare il bus. Scrive solo
+dove serve: se il termostato ha già il valore voluto non tocca nulla, quindi in
+condizioni normali sul bus non passa traffico.
+
+Ogni cambio di setpoint che non sia l'eco di una scrittura di CTHA è qualcun
+altro che ha messo mano alla zona — la manopola, l'app del costruttore, la
+centrale. Diventa un override fino alla fine della mezz'ora corrente, non un
+errore da correggere all'istante.
 
 ## Funzionalità
 
 - Pannello in sidebar con griglia settimanale a 48 mezz'ore e pennellata a
   trascinamento
-- Entità `climate` per zona, configurabile dalla UI senza YAML
+- Una entità `climate` per zona, sopra al termostato reale, configurabile dalla
+  UI senza YAML
 - Programma settimanale a scenari con template riutilizzabili
 - Livelli `comfort`, `eco`, `antifreeze` con ereditarietà zona → globale
 - Override con quattro politiche di scadenza e soppressione delle eco
 - Persistenza su Store dedicato, separata dalla config entry
-- Controllo a isteresi con tolleranze separate sopra/sotto il setpoint
 - Servizi per override, template, scenari e setpoint, usabili dalle automazioni
 - Integrità referenziale: non si elimina un template ancora in uso, e l'errore
   dice chi lo sta usando
@@ -57,8 +70,13 @@ scritture di 1.5 s fra una zona e l'altra per non saturare il bus.
 ## Requisiti
 
 - Home Assistant 2024.12 o successivo
-- Un sensore con `device_class: temperature`
-- Un attuatore comandabile: `switch`, `input_boolean` o `climate`
+- Una entità `climate` per ogni zona da programmare, che accetti
+  `climate.set_temperature`
+
+Su impianto BTicino le entità arrivano dall'integrazione
+[MyHOME](https://github.com/anotherjulien/MyHOME): il gateway F454 espone una
+entità `climate` per ogni termostato di zona F430/4. CTHA non richiede sensori
+di temperatura separati — la misura sta già negli attributi di quelle entità.
 
 ## Installazione
 
@@ -76,11 +94,21 @@ Home Assistant.
 ## Configurazione
 
 *Impostazioni → Dispositivi e servizi → Aggiungi integrazione → CTHA*, una
-volta per zona: nome, sensore di temperatura e attuatore. Le tolleranze di
-isteresi (default 0.3 °C) si regolano poi da *Configura*.
+volta per zona: un nome e il termostato che governa quella zona. Una zona per
+termostato.
 
 Al primo avvio viene creato un programma di default: notte in eco, risveglio e
 sera in comfort, uguale per tutti i giorni.
+
+Per ogni zona nasce una entità `climate` di CTHA, che affianca quella del
+termostato reale: mostra la stessa temperatura misurata, ma il suo target è
+*quello che il programma vuole*, e i suoi attributi dicono da dove viene
+(`level`, `setpoint_source`, `scenario`, e l'eventuale override). Cambiarne la
+temperatura crea un override; il preset corrisponde al livello. Conviene
+nascondere dalle dashboard le entità del termostato sottostante e usare queste.
+
+Spegnere la zona (`hvac_mode: off`) spegne il termostato sottostante, e finché
+resta spenta CTHA non le scrive più setpoint.
 
 ## Il pannello
 
@@ -208,8 +236,8 @@ chi; `delete_scenario` non tocca né lo scenario attivo né l'ultimo rimasto.
 ```
 custom_components/ctha/
 ├── __init__.py       # setup/unload delle entry, runtime condiviso
-├── climate.py        # entità climate di zona, attuazione a isteresi
-├── config_flow.py    # config flow e options flow
+├── climate.py        # entità climate di zona, scrittura del setpoint
+├── config_flow.py    # config flow: nome della zona e termostato
 ├── const.py          # domain, chiavi, livelli, timing, default
 ├── coordinator.py    # runtime: programma, override, watchdog
 ├── models.py         # modello dati serializzabile
@@ -260,9 +288,10 @@ npm run watch     # ricompila a ogni salvataggio
 
 - [x] Pannello React in sidebar per la griglia di programmazione (paint-drag)
 - [x] Vista delle dipendenze "chi usa questo template" nell'interfaccia
-- [ ] Adattatore MyHOME/BTicino: scrittura setpoint e lettura offset manopola
+- [x] Scrittura del setpoint sul termostato di zona
+- [ ] Lettura dei messaggi di offset locale dell'F430/4, per distinguere la
+      manopola fisica (override `hardware`) dalle altre sorgenti esterne
 - [ ] Appiattimento del programma dell'unità centrale 3550
-- [ ] Durata minima di ciclo per proteggere la caldaia
 - [ ] Test della parte che tocca HA con `pytest-homeassistant-custom-component`
 
 ## Licenza

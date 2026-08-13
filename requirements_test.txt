@@ -1,3 +1,8 @@
 # Dipendenze per la suite sul nucleo puro (const, models, resolve, override,
 # program): non serve Home Assistant, vedi tests/conftest.py.
 pytest>=8.0
+
+# pyflakes lavora sull'AST e non importa nulla: è l'unico modo di controllare
+# import inutilizzati e nomi inesistenti anche nei moduli che dipendono da
+# Home Assistant, che qui non è installabile.
+pyflakes>=3.2

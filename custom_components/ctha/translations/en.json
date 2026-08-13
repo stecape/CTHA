@@ -3,27 +3,15 @@
     "step": {
       "user": {
         "title": "CTHA - Chronothermostat",
-        "description": "Pick the temperature sensor and the actuator to control.",
+        "description": "Pick the thermostat that runs the zone: CTHA will schedule its setpoint. Control itself stays with the thermostat.",
         "data": {
-          "name": "Name",
-          "sensor_entity_id": "Temperature sensor",
-          "heater_entity_id": "Actuator (boiler / valve)"
+          "name": "Zone name",
+          "target_entity_id": "Zone thermostat"
         }
       }
     },
     "abort": {
-      "already_configured": "A zone already exists for this actuator."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Hysteresis",
-        "data": {
-          "cold_tolerance": "Tolerance below setpoint",
-          "hot_tolerance": "Tolerance above setpoint"
-        }
-      }
+      "already_configured": "A zone already exists for this thermostat."
     }
   },
   "services": {

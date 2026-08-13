@@ -20,11 +20,17 @@ termostati fisici e dall'unità centrale.
 **Nota sullo stato del codice**: l'architettura target è implementata in
 `custom_components/ctha/` (modello dati a riferimenti, risoluzione su due assi,
 override con soppressione echo, persistenza su Store, watchdog di
-riconciliazione, modifica del programma, servizi) e in `frontend/` (pannello
-React in sidebar con la griglia di programmazione). Resta fuori dal codice
-l'adattatore specifico BTicino/MyHOME: l'attuazione avviene ancora tramite
-isteresi su un attuatore generico (`switch`, `input_boolean` o `climate`), che
-è il punto in cui si innesterà la scrittura dei setpoint sul bus OpenWebNet.
+riconciliazione, modifica del programma, servizi, scrittura del setpoint sul
+termostato di zona) e in `frontend/` (pannello React in sidebar con la griglia
+di programmazione). Resta fuori la lettura dei messaggi di offset locale
+dell'F430/4, che richiede di entrare dentro MyHOME.
+
+**CTHA non regola: programma.** Una zona *è* una entità `climate` che già
+esiste — l'F430/4 esposto da MyHOME. Quel termostato misura la temperatura e
+comanda la valvola; CTHA gli dice solo quale setpoint tenere, scrivendo
+`climate.set_temperature`. Non esiste isteresi nel componente, e non deve
+tornarci: quel livello lo copre già `generic_thermostat` di HA core, e per
+questo impianto è il livello sbagliato.
 
 Dominio dell'integrazione: `ctha`. Tipo: `helper`, `iot_class: local_push`.
 
@@ -33,8 +39,8 @@ Dominio dell'integrazione: `ctha`. Tipo: `helper`, `iot_class: local_push`.
 ```
 custom_components/ctha/
 ├── __init__.py        # setup/unload delle entry, avvio del runtime condiviso
-├── climate.py         # CthaThermostat: entità di zona, attuazione a isteresi
-├── config_flow.py     # CthaConfigFlow (setup iniziale) e CthaOptionsFlow (tolleranze)
+├── climate.py         # CthaThermostat: entità di zona, scrittura del setpoint
+├── config_flow.py     # CthaConfigFlow: nome della zona e termostato da pilotare
 ├── const.py           # DOMAIN, chiavi di config, livelli, timing, default
 ├── coordinator.py     # CthaCoordinator: programma, override, watchdog
 ├── models.py          # dataclass del modello dati, serializzabili nello Store
@@ -75,13 +81,10 @@ entry e smontate con l'ultima. È la ragione per cui il coordinator non è per
 zona: la riconciliazione deve scaglionare le scritture di tutte le zone su un
 unico bus.
 
-- **Config entry**: creata da `CthaConfigFlow.async_step_user`, richiede
-  `name`, `sensor_entity_id` (sensore con `device_class: temperature`) e
-  `heater_entity_id` (dominio `switch`, `input_boolean` o `climate`). Una sola
-  zona per attuatore (`_async_abort_entries_match`). L'id della zona è
-  l'`entry_id`.
-- **Options flow**: `CthaOptionsFlow` permette di rivedere a caldo
-  `cold_tolerance` e `hot_tolerance` (isteresi, default 0.3 °C ciascuna).
+- **Config entry**: creata da `CthaConfigFlow.async_step_user`, richiede `name`
+  e `target_entity_id` (una entità del dominio `climate`). Una sola zona per
+  termostato (`_async_abort_entries_match`). L'id della zona è l'`entry_id`.
+  Non c'è options flow: non è rimasto nulla da regolare a caldo.
 - **`models.py`**: `CthaData` è la radice persistita — setpoint globali,
   `DayTemplate`, `WeekTemplate`, `Scenario`, `Zone`, `Override`, scenario
   attivo. Ogni dataclass ha `to_dict`/`from_dict`; `DayTemplate` valida in
@@ -112,19 +115,30 @@ unico bus.
   (`APPLY_DEBOUNCE_SECONDS`) perché una griglia dipinta col mouse produce
   decine di modifiche e ogni riscrittura completa occupa il bus per 1.5 s per
   zona.
-- **`CthaThermostat` (climate.py)**: entità di zona.
-  - Estende `CoordinatorEntity` + `ClimateEntity` + `RestoreEntity`.
-  - Non decide più il setpoint: lo riceve dal coordinator tramite il writer
-    `_async_apply_setpoint`. Qui resta solo l'attuazione.
+- **`CthaThermostat` (climate.py)**: entità di zona, sovrapposta al termostato
+  reale. È l'adattatore fra il programma e il bus.
+  - Rispecchia dal termostato pilotato ciò che è suo: temperatura misurata,
+    acceso/spento, `hvac_action`. Non li tiene in stato proprio, li legge —
+    per questo non serve più `RestoreEntity`.
+  - Il `target_temperature` invece è **quello che il programma vuole**: la
+    differenza fra questo e il valore sul bus è il segnale che qualcuno ha
+    messo mano alla zona.
+  - `_async_apply_setpoint` è il writer registrato nel coordinator: chiama
+    `climate.set_temperature` sul termostato, ma **solo se il valore è diverso
+    da quello già presente** oltre `WRITE_DEADBAND`. Senza quel confronto il
+    watchdog riscriverebbe ogni 12 minuti valori già corretti, per sempre. Se
+    la zona è spenta non scrive: riaccenderla non l'ha chiesto nessuno.
+  - `_async_note_external`: ogni cambio del setpoint sul termostato che non sia
+    un'eco nostra diventa un override `external` con policy `next_slot`. Dal
+    bus la manopola, l'app e la centrale arrivano identiche — l'unica cosa
+    dicibile è "non l'ho scritto io", e tenerlo fino al prossimo slot è meno
+    peggio sia dell'ignorarlo sia del litigarci ogni minuto. Se a riasserire è
+    la 3550, il rimedio vero resta appiattirne il programma.
   - `async_set_temperature` e `async_set_preset_mode` creano un **override**
     (policy `next_slot`), non modificano il programma.
-  - Logica a isteresi in `_async_control_heating`: accende l'attuatore se
-    `current <= target - cold_tolerance`, lo spegne se
-    `current >= target + hot_tolerance`; se `hvac_mode == OFF` lo spegne e
-    basta.
-  - `_async_set_heater` chiama `turn_on`/`turn_off` sul dominio
-    dell'attuatore solo se lo stato deve effettivamente cambiare (evita
-    chiamate ridondanti al servizio).
+  - `async_set_hvac_mode` inoltra al termostato; riaccendendo si preferisce
+    `heat` ad `auto`, perché su BTicino `auto` significa "segui il programma
+    della centrale", cioè proprio ciò che CTHA sta sostituendo.
   - I preset corrispondono ai livelli: `comfort`, `eco`, `antifreeze`.
 
 Tutte le costanti condivise (chiavi di config, livelli, timing, default,
@@ -213,6 +227,17 @@ eseguire l'`__init__.py` vero, che importerebbe `homeassistant`. Un modulo
 nuovo è testabile qui **solo se non importa HA**; se lo importa, il suo test
 va rimandato a `pytest-homeassistant-custom-component`.
 
+Per i moduli che HA lo importano davvero resta pyflakes, che lavora sull'AST e
+non esegue nulla:
+
+```bash
+.venv/Scripts/python -m pyflakes custom_components/ctha tests
+```
+
+Non verifica la logica, ma prende import inutilizzati e nomi inesistenti anche
+lì dove non si può importare niente. Vale la pena lanciarlo dopo ogni modifica
+a `climate.py`, `coordinator.py`, `services.py`, `websocket.py`, `panel.py`.
+
 Non c'è ancora un ambiente HA di sviluppo nel repo. Per validare a mano le
 parti che toccano HA:
 
@@ -266,16 +291,19 @@ progressive. Stato attuale di ciascun pezzo:
 - **Interfaccia di programmazione** — *fatta*: griglia paint-drag, valori
   ereditati mostrati con la loro fonte, vista delle dipendenze e scappatoia
   "duplica e scollega" al momento in cui serve.
+- **Adattatore verso il bus** — *fatto a metà*: la scrittura dei setpoint passa
+  per `climate.set_temperature` sull'entità MyHOME della zona, che è tutto ciò
+  che serve per programmare. Manca solo la lettura dei messaggi di offset
+  locale, l'unica via per marcare un override come `hardware` anziché
+  `external`.
 
 ## Prossimi passi
 
-- Adattatore MyHOME/BTicino: scrittura dei setpoint sul bus al posto
-  dell'isteresi generica, e lettura dei messaggi di offset locale per
-  registrare gli override `hardware`
+- Lettura dei messaggi di offset locale dell'F430/4, per distinguere la manopola
+  fisica dalle altre sorgenti esterne. È l'ultimo pezzo che richiede di entrare
+  dentro MyHOME
 - Probabile necessità di fare un fork personale dell'integrazione MyHOME,
   poiché il progetto upstream è di fatto non mantenuto dall'inizio del 2024
-- Durata minima di ciclo per proteggere la caldaia (`CONF_MIN_CYCLE_DURATION`
-  è definita in `const.py` ma non ancora usata in `climate.py`)
 - Test con `pytest-homeassistant-custom-component` per la parte che tocca HA:
   coordinator, entità climate, registrazione di servizi, websocket e pannello.
   Il nucleo puro è già coperto da `tests/`, il bundle da `npm run smoke`
@@ -285,6 +313,14 @@ progressive. Stato attuale di ciascun pezzo:
 
 ## Apprendimenti e principi chiave
 
+- **MyHOME espone ogni zona come entità `climate`, non come sensore più
+  attuatore.** Il gateway F454 è l'integrazione; sotto ci sono i dispositivi
+  F430/4, e ciascuno diventa una entità `climate` con `current_temperature`,
+  `temperature`, `hvac_action` e le modalità spento/automatico/caldo. Non
+  esistono `sensor` separati con `device_class: temperature`. La prima versione
+  del config flow li chiedeva ed era inconfigurabile su un impianto reale: il
+  menù delle entità restava vuoto. Verificato sull'impianto di Stefano il
+  13 agosto 2026.
 - L'integrazione MyHOME gestisce effettivamente i messaggi di offset locale
   dalla manopola fisica F430/4 — confermato ispezionando direttamente il
   repository GitHub.
