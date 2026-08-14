@@ -3,9 +3,17 @@
 Ogni config entry descrive una zona, ma programma, scenari e override sono
 condivisi: Store, coordinator e servizi sono quindi istanze uniche, create
 alla prima entry e smontate con l'ultima.
+
+«Alla prima entry» richiede attenzione: Home Assistant avvia le entry di uno
+stesso dominio **in parallelo**, quindi la parte condivisa va serializzata.
+Senza, tutte entrano insieme nel ramo di inizializzazione — un `if` seguito da
+un `await` non è una guardia — e tutte tranne una falliscono registrando un
+pannello che nel frattempo esiste già.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -28,11 +36,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     store = async_get_store(hass)
     coordinator = async_get_coordinator(hass, store)
 
-    if not domain_data.get("initialized"):
-        await coordinator.async_initialize()
-        async_register_websocket(hass)
-        await async_register_panel(hass)
-        domain_data["initialized"] = True
+    # Il lock, non il flag, è ciò che rende unica l'inizializzazione: il flag da
+    # solo verrebbe letto da tutte le entry prima che la prima riesca ad
+    # alzarlo, perché fra la lettura e la scrittura ci sono degli `await`.
+    lock: asyncio.Lock = domain_data.setdefault("init_lock", asyncio.Lock())
+    async with lock:
+        if not domain_data.get("initialized"):
+            await coordinator.async_initialize()
+            async_register_websocket(hass)
+            await async_register_panel(hass)
+            domain_data["initialized"] = True
 
     async_register_services(hass)
     domain_data.setdefault("entries", set()).add(entry.entry_id)
