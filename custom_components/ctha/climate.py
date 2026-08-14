@@ -18,6 +18,7 @@ Da qui discendono due comportamenti che sembrano dettagli e non lo sono:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -59,7 +60,10 @@ from .const import (
     OVERRIDE_SOURCE_EXTERNAL,
     POLICY_UNTIL_LEVEL_CHANGE,
     TEMP_STEP,
+    WRITE_ATTEMPTS,
     WRITE_DEADBAND,
+    WRITE_RETRY_SECONDS,
+    WRITE_VERIFY_SECONDS,
 )
 from .coordinator import CthaCoordinator
 from .resolve import resolve_level_temperature
@@ -119,7 +123,7 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
         }
 
         self._attr_target_temperature: float | None = None
-        self._attr_current_temperature: float | None = None
+        self._write_lock = asyncio.Lock()
 
     async def async_added_to_hass(self) -> None:
         """Registra la zona, si aggancia al termostato e applica il programma."""
@@ -297,27 +301,85 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
     # --- Scrittura sul bus --------------------------------------------------
 
     async def _async_apply_setpoint(self, temperature: float) -> None:
-        """Writer registrato nel coordinator: porta il setpoint sul termostato."""
-        self._attr_target_temperature = temperature
+        """Writer registrato nel coordinator: porta il setpoint sul termostato.
 
-        if self.hvac_mode == HVACMode.OFF:
-            # Una zona spenta a mano resta spenta: scriverle un setpoint la
-            # riaccenderebbe, e nessuno l'ha chiesto.
+        Scrive, verifica, e se serve riprova. La chiamata al servizio che riesce
+        non dimostra che il setpoint sia arrivato: ha solo consegnato il comando
+        al gateway, e sul bus da lì in poi può perdersi in silenzio. L'unica
+        prova è che il termostato riporti il valore chiesto.
+
+        Senza questo, una scrittura persa restava tale fino al giro successivo
+        del watchdog — fino a dodici minuti di zona ferma sul valore sbagliato,
+        senza una riga di log.
+        """
+        # Un lock per zona: il tick di slot e il watchdog possono sovrapporsi, e
+        # due cicli di scrittura intrecciati sullo stesso termostato si
+        # verificherebbero a vicenda il valore dell'altro.
+        async with self._write_lock:
+            self._attr_target_temperature = temperature
+
+            if self.hvac_mode == HVACMode.OFF:
+                # Una zona spenta a mano resta spenta: scriverle un setpoint la
+                # riaccenderebbe, e nessuno l'ha chiesto.
+                self.async_write_ha_state()
+                return
+
+            for attempt in range(1, WRITE_ATTEMPTS + 1):
+                if not self._needs_write(temperature):
+                    break
+                if attempt > 1:
+                    await asyncio.sleep(WRITE_RETRY_SECONDS)
+                    _LOGGER.debug(
+                        "Il setpoint %.1f °C non è arrivato su %s: tentativo %d di %d",
+                        temperature,
+                        self._target_entity_id,
+                        attempt,
+                        WRITE_ATTEMPTS,
+                    )
+                await self._async_write_setpoint(temperature)
+                # Il valore torna dal bus come cambio di stato, non come esito
+                # della chiamata: senza questa attesa si verificherebbe sempre
+                # il valore vecchio, e si riproverebbe sempre.
+                await asyncio.sleep(WRITE_VERIFY_SECONDS)
+
+            if self._needs_write(temperature):
+                _LOGGER.warning(
+                    "Il setpoint %.1f °C non è arrivato su %s dopo %d tentativi: "
+                    "sul bus resta %s",
+                    temperature,
+                    self._target_entity_id,
+                    WRITE_ATTEMPTS,
+                    self._bus_setpoint(),
+                )
+
             self.async_write_ha_state()
-            return
 
-        if not self._needs_write(temperature):
-            self.async_write_ha_state()
-            return
+    async def _async_write_setpoint(self, temperature: float) -> None:
+        """Manda il comando al termostato, senza fermare il ciclo se fallisce.
 
-        await self.hass.services.async_call(
-            CLIMATE_DOMAIN,
-            SERVICE_SET_TEMPERATURE,
-            {ATTR_ENTITY_ID: self._target_entity_id, ATTR_TEMPERATURE: temperature},
-            blocking=True,
-            context=self._context,
-        )
-        self.async_write_ha_state()
+        Un errore qui è un tentativo andato male, non la fine: quello dopo può
+        riuscire, e la decisione se insistere è di chi tiene il ciclo.
+        """
+        try:
+            await self.hass.services.async_call(
+                CLIMATE_DOMAIN,
+                SERVICE_SET_TEMPERATURE,
+                {ATTR_ENTITY_ID: self._target_entity_id, ATTR_TEMPERATURE: temperature},
+                blocking=True,
+                context=self._context,
+            )
+        except Exception as err:  # noqa: BLE001 - il ciclo decide se riprovare
+            _LOGGER.debug(
+                "Scrittura di %.1f °C su %s non riuscita: %s",
+                temperature,
+                self._target_entity_id,
+                err,
+            )
+
+    def _bus_setpoint(self) -> float | None:
+        """Setpoint che il termostato riporta adesso, per i messaggi d'errore."""
+        state = self._target_state
+        return None if state is None else _as_float(state.attributes.get(ATTR_TEMPERATURE))
 
     def _needs_write(self, temperature: float) -> bool:
         """True se il bus non ha già il valore voluto."""

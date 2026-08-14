@@ -18,6 +18,18 @@ CONF_TARGET: Final = "target_entity_id"
 # riscriverebbe sul bus valori già corretti, per sempre.
 WRITE_DEADBAND: Final = 0.05
 
+# Un comando sul bus OpenWebNet può perdersi senza che nessuno se ne accorga:
+# la chiamata al servizio riesce comunque, perché ha solo consegnato il comando
+# al gateway. L'unica verifica possibile è guardare se il termostato riporta il
+# valore chiesto — e riprovare se non lo riporta.
+#
+# `WRITE_VERIFY_SECONDS` è quanto si concede al bus per rispondere prima di
+# considerare persa la scrittura: troppo poco fa riprovare quando bastava
+# aspettare, e ogni tentativo in più è traffico su un bus lento.
+WRITE_ATTEMPTS: Final = 3
+WRITE_VERIFY_SECONDS: Final = 1.5
+WRITE_RETRY_SECONDS: Final = 2.0
+
 # --- Storage ----------------------------------------------------------------
 # Versione 2: livelli di temperatura definibili dall'utente, scenari come
 # configurazione delle zone, ereditarietà su cinque livelli.

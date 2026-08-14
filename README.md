@@ -72,6 +72,10 @@ scritture di 1.5 s fra una zona e l'altra per non saturare il bus. Scrive solo
 dove serve: se il termostato ha già il valore voluto non tocca nulla, quindi in
 condizioni normali sul bus non passa traffico.
 
+Ogni scrittura viene **verificata e, se serve, ripetuta**: una chiamata riuscita
+dice solo che il comando è stato consegnato al gateway, non che sia arrivato a
+destinazione. L'unica prova è che il termostato riporti il valore chiesto.
+
 Ogni cambio di setpoint che non sia l'eco di una scrittura di CTHA è qualcun
 altro che ha messo mano alla zona — la manopola, l'app del costruttore, la
 centrale. Diventa un override per la fascia in corso, non un errore da

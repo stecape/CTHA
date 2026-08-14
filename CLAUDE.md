@@ -196,6 +196,14 @@ unico bus.
     da quello già presente** oltre `WRITE_DEADBAND`. Senza quel confronto il
     watchdog riscriverebbe ogni 12 minuti valori già corretti, per sempre. Se
     la zona è spenta non scrive: riaccenderla non l'ha chiesto nessuno.
+  - **Scrive, verifica, riprova** (`WRITE_ATTEMPTS`). La chiamata al servizio
+    che riesce non dimostra che il setpoint sia arrivato: ha consegnato il
+    comando al gateway, e sul bus da lì in poi può perdersi in silenzio.
+    L'unica prova è che il termostato riporti il valore chiesto, e per averla
+    bisogna aspettare (`WRITE_VERIFY_SECONDS`), perché torna come cambio di
+    stato e non come esito della chiamata. Un lock per zona impedisce che tick
+    di slot e watchdog intreccino due cicli sullo stesso termostato,
+    verificandosi a vicenda il valore dell'altro.
   - `_async_note_external`: ogni cambio del setpoint sul termostato che non sia
     un'eco nostra diventa un override `external` con policy `next_slot`. Dal
     bus la manopola, l'app e la centrale arrivano identiche — l'unica cosa
