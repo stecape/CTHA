@@ -126,6 +126,16 @@ unico bus.
   riconosce le eco delle nostre scritture (`note_write` / `is_echo`) e applica
   le scadenze (`is_expired`, `purge_expired`). Gli override `hardware` non
   scadono mai: nessun comando software può annullarli.
+  - Le policy che scadono su un *cambiamento* non hanno un istante da
+    calcolare: `Override` memorizza com'era il mondo alla creazione
+    (`scenario_id`, `level`) e `is_expired` confronta. Per questo `purge_expired`
+    risolve da sé il livello di ogni zona — chi lo chiama è un timer, e non sa
+    in che fascia si trovi ciascuna.
+  - `until_level_change` è la policy di **ogni mano sul termostato**: manopola,
+    pannello, `set_temperature` sull'entità. Vale finché il programma tiene lo
+    stesso livello, che è ciò che l'utente intende quando alza la temperatura
+    alle 07:05. Il costo è che una riasserzione della 3550 — indistinguibile
+    dalla manopola, dal bus arrivano uguali — dura anch'essa quanto la fascia.
 - **`program.py`**: le modifiche al programma, sempre come funzioni pure sul
   modello. Fa rispettare due regole: non si cita ciò che non esiste, e non si
   elimina ciò che è ancora citato — con `Usage` che dice *chi* sta usando
@@ -346,8 +356,8 @@ progressive. Stato attuale di ciascun pezzo:
     persistente che non può essere annullato via software — può solo essere
     compensato o mostrato nell'interfaccia. Nel codice: `source = hardware`,
     mai soggetto a scadenza.
-  - Politiche di scadenza implementate: `next_slot`, `duration`,
-    `until_scenario_change` e `sticky`.
+  - Politiche di scadenza implementate: `until_level_change` (quella dei gesti
+    manuali), `next_slot`, `duration`, `until_scenario_change` e `sticky`.
 - **Mitigazione dei conflitti con l'unità centrale 3550**: il loop di
   riconciliazione watchdog è *fatto* (`coordinator.py`, `RECONCILE_INTERVAL`
   = 12 min, scritture scaglionate di `WRITE_STAGGER_SECONDS` = 1.5 s).

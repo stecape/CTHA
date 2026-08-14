@@ -21,6 +21,7 @@ export type Layer =
 export type OverrideSource = "ha" | "external" | "hardware";
 export type Policy =
   | "next_slot"
+  | "until_level_change"
   | "duration"
   | "until_scenario_change"
   | "sticky";
@@ -80,6 +81,8 @@ export interface Override {
   created_at: string | null;
   expires_at: string | null;
   scenario_id: string | null;
+  /** Fascia in vigore alla creazione: `until_level_change` si regge su questa. */
+  level: LevelId | null;
 }
 
 export interface Program {

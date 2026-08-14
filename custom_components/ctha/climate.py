@@ -56,7 +56,7 @@ from .const import (
     MAX_TEMP,
     MIN_TEMP,
     OVERRIDE_SOURCE_EXTERNAL,
-    POLICY_NEXT_SLOT,
+    POLICY_UNTIL_LEVEL_CHANGE,
     TEMP_STEP,
     WRITE_DEADBAND,
 )
@@ -225,11 +225,17 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
     # --- Comandi ------------------------------------------------------------
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
-        """Un setpoint scelto a mano è un override, non una modifica al programma."""
+        """Un setpoint scelto a mano è un override, non una modifica al programma.
+
+        Vale per tutta la fascia in corso: chi alza la temperatura alle 07:05
+        la vuole per la mattina, non per venticinque minuti. Al cambio di fascia
+        il programma riprende, che è il momento in cui l'utente si aspetta che
+        la casa cambi comportamento da sola.
+        """
         if (temperature := kwargs.get(ATTR_TEMPERATURE)) is None:
             return
         await self.coordinator.async_set_override(
-            self._zone_id, float(temperature), policy=POLICY_NEXT_SLOT
+            self._zone_id, float(temperature), policy=POLICY_UNTIL_LEVEL_CHANGE
         )
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
@@ -250,7 +256,7 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
             return
 
         await self.coordinator.async_set_override(
-            self._zone_id, resolution.temperature, policy=POLICY_NEXT_SLOT
+            self._zone_id, resolution.temperature, policy=POLICY_UNTIL_LEVEL_CHANGE
         )
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
@@ -369,9 +375,14 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
 
         Non si distingue la manopola dall'app né dalla centrale: dal bus
         arrivano uguali. L'unica cosa che si può dire è "non l'ho scritto io",
-        e la risposta ragionevole è tenerlo fino al prossimo slot invece di
-        sovrascriverlo subito — se fosse la centrale a riasserire il proprio
-        programma, il rimedio vero è appiattirlo, non litigarci ogni minuto.
+        e la risposta ragionevole è tenerlo per la fascia in corso invece di
+        sovrascriverlo subito.
+
+        Il rovescio della medaglia: se a scrivere è la centrale 3550 che
+        riafferma il proprio programma, anche *quella* resta per tutta la
+        fascia. Litigarci ogni minuto sarebbe peggio, ma il rimedio vero resta
+        appiattire il programma della centrale — finché non è appiattito, una
+        sua riasserzione costa più di prima.
         """
         if self.coordinator.overrides.is_echo(self._zone_id, setpoint, dt_util.now()):
             return
@@ -393,7 +404,7 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
         await self.coordinator.async_set_override(
             self._zone_id,
             setpoint,
-            policy=POLICY_NEXT_SLOT,
+            policy=POLICY_UNTIL_LEVEL_CHANGE,
             source=OVERRIDE_SOURCE_EXTERNAL,
         )
 

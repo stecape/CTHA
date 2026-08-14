@@ -29,7 +29,7 @@
         },
         "policy": {
           "name": "Scadenza",
-          "description": "Quando l'override decade: fine dello slot corrente, durata fissa, cambio di scenario, oppure mai."
+          "description": "Quando l'override decade: fine della mezz'ora corrente, cambio di fascia, durata fissa, cambio di scenario, oppure mai. È «cambio di fascia» quello che nasce da una mano sul termostato."
         },
         "duration": {
           "name": "Durata",

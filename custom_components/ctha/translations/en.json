@@ -29,7 +29,7 @@
         },
         "policy": {
           "name": "Expiry",
-          "description": "When the override lapses: end of the current slot, fixed duration, scenario change, or never."
+          "description": "When the override lapses: end of the current half-hour, level change, fixed duration, scenario change, or never. Overrides born from a hand on the thermostat use «level change»."
         },
         "duration": {
           "name": "Duration",

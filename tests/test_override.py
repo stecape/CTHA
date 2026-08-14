@@ -5,18 +5,26 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 import pytest
-from ctha import models, override as override_mod
+from conftest import HIGH, LOW
+from ctha import models, override as override_mod, program
 from ctha.const import (
+    INHERIT_CHAR,
     OVERRIDE_SOURCE_EXTERNAL,
     OVERRIDE_SOURCE_HA,
     OVERRIDE_SOURCE_HARDWARE,
     POLICY_DURATION,
     POLICY_NEXT_SLOT,
     POLICY_STICKY,
+    POLICY_UNTIL_LEVEL_CHANGE,
     POLICY_UNTIL_SCENARIO_CHANGE,
+    SLOTS_PER_DAY,
 )
 
+# Martedì mattina: la giornata tipo di default tiene «alta» dalle 06:00 alle
+# 08:30, poi passa a «media». Le due fasce servono a far scadere l'override.
 NOW = datetime(2026, 8, 11, 7, 10)
+SAME_BAND = datetime(2026, 8, 11, 8, 0)
+NEXT_BAND = datetime(2026, 8, 11, 9, 0)
 
 
 @pytest.fixture
@@ -55,6 +63,64 @@ def test_duration_senza_intervallo_usa_un_ora(
     """Il default esiste perché il servizio può omettere la durata."""
     override = manager.set("z1", 24.0, NOW, policy=POLICY_DURATION)
     assert override.expires_at == NOW + timedelta(hours=1)
+
+
+def test_until_level_change_sopravvive_al_confine_di_slot(
+    data: models.CthaData, manager: override_mod.OverrideManager
+) -> None:
+    """È la differenza con `next_slot`: la fascia dura più della mezz'ora.
+
+    Alle 07:10 e alle 08:00 il programma tiene lo stesso livello, ma sono due
+    slot diversi: `next_slot` sarebbe già decaduto.
+    """
+    override = manager.set("z1", 24.0, NOW, policy=POLICY_UNTIL_LEVEL_CHANGE)
+
+    assert override.level == HIGH
+    assert override.expires_at is None
+    assert not override_mod.is_expired(override, SAME_BAND, "default", HIGH)
+
+
+def test_until_level_change_decade_al_cambio_di_fascia(
+    manager: override_mod.OverrideManager,
+) -> None:
+    """Quando il programma cambia livello, la mano dell'utente ha esaurito il suo."""
+    override = manager.set("z1", 24.0, NOW, policy=POLICY_UNTIL_LEVEL_CHANGE)
+    assert override_mod.is_expired(override, NEXT_BAND, "default", LOW)
+
+
+def test_until_level_change_nel_purge(
+    data: models.CthaData, manager: override_mod.OverrideManager
+) -> None:
+    """Il purge risolve da sé la fascia di ogni zona: il timer non la conosce."""
+    manager.set("z1", 24.0, NOW, policy=POLICY_UNTIL_LEVEL_CHANGE)
+
+    assert manager.purge_expired(SAME_BAND) == []
+    assert "z1" in data.overrides
+
+    assert manager.purge_expired(NEXT_BAND) == ["z1"]
+    assert "z1" not in data.overrides
+
+
+def test_until_level_change_decade_se_il_programma_cambia(
+    data: models.CthaData, manager: override_mod.OverrideManager
+) -> None:
+    """Non serve che passi il tempo: basta che cambi il programma sotto i piedi."""
+    manager.set("z1", 24.0, NOW, policy=POLICY_UNTIL_LEVEL_CHANGE)
+    program.paint_day_template(data, "default", LOW, 0, SLOTS_PER_DAY - 1)
+
+    assert manager.purge_expired(NOW) == ["z1"]
+
+
+def test_until_level_change_con_slot_che_eredita(
+    data: models.CthaData, manager: override_mod.OverrideManager
+) -> None:
+    """Uscire dall'ereditarietà è un cambio di fascia come gli altri."""
+    data.day_templates["default"].slots = INHERIT_CHAR * SLOTS_PER_DAY
+    override = manager.set("z1", 24.0, NOW, policy=POLICY_UNTIL_LEVEL_CHANGE)
+
+    assert override.level is None
+    assert not override_mod.is_expired(override, NEXT_BAND, "default", None)
+    assert override_mod.is_expired(override, NEXT_BAND, "default", HIGH)
 
 
 def test_until_scenario_change(manager: override_mod.OverrideManager) -> None:
@@ -175,3 +241,21 @@ def test_override_ricorda_lo_scenario_di_creazione(
     """`until_scenario_change` si regge su questo campo."""
     data.active_scenario = "vacanza"
     assert manager.set("z1", 24.0, NOW).scenario_id == "vacanza"
+
+
+def test_override_ricorda_la_fascia_di_creazione(
+    manager: override_mod.OverrideManager,
+) -> None:
+    """`until_level_change` si regge su questo, e vale per ogni override."""
+    assert manager.set("z1", 24.0, NOW, policy=POLICY_NEXT_SLOT).level == HIGH
+
+
+def test_round_trip_della_fascia(
+    data: models.CthaData, manager: override_mod.OverrideManager
+) -> None:
+    """Un riavvio non deve far scadere un override per amnesia."""
+    manager.set("z1", 24.0, NOW, policy=POLICY_UNTIL_LEVEL_CHANGE)
+    restored = models.CthaData.from_dict(data.to_dict()).overrides["z1"]
+
+    assert restored.level == HIGH
+    assert restored.policy == POLICY_UNTIL_LEVEL_CHANGE

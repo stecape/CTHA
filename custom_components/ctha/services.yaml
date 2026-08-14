@@ -20,6 +20,7 @@ set_override:
         select:
           options:
             - next_slot
+            - until_level_change
             - duration
             - until_scenario_change
             - sticky

@@ -27,10 +27,11 @@ from .const import (
     POLICY_DURATION,
     POLICY_NEXT_SLOT,
     POLICY_STICKY,
+    POLICY_UNTIL_LEVEL_CHANGE,
     POLICY_UNTIL_SCENARIO_CHANGE,
 )
 from .models import CthaData, Override
-from .resolve import next_slot_start
+from .resolve import next_slot_start, resolve_level
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,16 +50,29 @@ def expiry_for(
         return next_slot_start(now)
     if policy == POLICY_DURATION:
         return now + (duration or timedelta(hours=1))
-    # sticky e until_scenario_change non hanno una scadenza temporale.
+    # Le policy che scadono su un cambiamento — di fascia, di scenario — non
+    # hanno un istante da calcolare: lo si scopre solo guardando il programma.
     return None
 
 
-def is_expired(override: Override, now: datetime, active_scenario: str) -> bool:
-    """Dice se un override ha esaurito la propria validità."""
+def is_expired(
+    override: Override,
+    now: datetime,
+    active_scenario: str,
+    current_level: str | None = None,
+) -> bool:
+    """Dice se un override ha esaurito la propria validità.
+
+    `current_level` è il livello che il *programma* imporrebbe adesso a quella
+    zona, e serve solo alla policy `until_level_change`: è il confronto con il
+    livello memorizzato alla creazione a dire se la fascia è cambiata.
+    """
     if override.source == OVERRIDE_SOURCE_HARDWARE or override.policy == POLICY_STICKY:
         return False
     if override.policy == POLICY_UNTIL_SCENARIO_CHANGE:
         return override.scenario_id != active_scenario
+    if override.policy == POLICY_UNTIL_LEVEL_CHANGE:
+        return override.level != current_level
     return override.expires_at is not None and now >= override.expires_at
 
 
@@ -102,7 +116,12 @@ class OverrideManager:
         policy: str = POLICY_NEXT_SLOT,
         duration: timedelta | None = None,
     ) -> Override:
-        """Crea o sostituisce l'override di una zona."""
+        """Crea o sostituisce l'override di una zona.
+
+        Il livello da memorizzare non lo si chiede al chiamante: è quello che il
+        programma impone alla zona in questo istante, e calcolarlo qui evita che
+        due punti di chiamata ne passino due diversi.
+        """
         override = Override(
             zone_id=zone_id,
             temperature=temperature,
@@ -111,6 +130,7 @@ class OverrideManager:
             created_at=now,
             expires_at=expiry_for(policy, now, duration),
             scenario_id=self._data.active_scenario,
+            level=resolve_level(self._data, zone_id, now),
         )
         self._data.overrides[zone_id] = override
         return override
@@ -124,12 +144,18 @@ class OverrideManager:
         return self._data.overrides.get(zone_id)
 
     def purge_expired(self, now: datetime) -> list[str]:
-        """Elimina gli override scaduti, restituendo le zone interessate."""
+        """Elimina gli override scaduti, restituendo le zone interessate.
+
+        Il livello corrente si risolve qui, zona per zona: chi chiama il purge è
+        un timer, e non ha modo di sapere in che fascia si trovi ciascuna zona.
+        """
         active = self._data.active_scenario
         expired = [
             zone_id
             for zone_id, override in self._data.overrides.items()
-            if is_expired(override, now, active)
+            if is_expired(
+                override, now, active, resolve_level(self._data, zone_id, now)
+            )
         ]
         for zone_id in expired:
             del self._data.overrides[zone_id]

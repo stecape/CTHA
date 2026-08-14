@@ -16,6 +16,7 @@ import { Card, NumberField } from "./ui";
 
 const POLICY_LABEL: Record<Policy, string> = {
   next_slot: "fine della mezz'ora",
+  until_level_change: "cambio di fascia",
   duration: "un'ora",
   until_scenario_change: "cambio scenario",
   sticky: "finché non lo tolgo",
@@ -248,7 +249,9 @@ function SetOverride({
   onSet: (temperature: number, policy: Policy) => void;
 }) {
   const [temperature, setTemperature] = useState<number | null>(suggested);
-  const [policy, setPolicy] = useState<Policy>("next_slot");
+  // Stessa scadenza di una mano sul termostato: forzare dal pannello e girare
+  // la manopola sono lo stesso gesto, e devono comportarsi allo stesso modo.
+  const [policy, setPolicy] = useState<Policy>("until_level_change");
 
   return (
     <div className="item-actions">

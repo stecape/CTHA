@@ -58,8 +58,14 @@ trattati diversamente:
 | `external` | app esterne, unità centrale | registrate, scadono secondo la policy |
 | `hardware` | manopola del termostato fisico | non annullabile via software: si mostra e si compensa |
 
-Politiche di scadenza disponibili: `next_slot`, `duration`,
-`until_scenario_change`, `sticky`.
+Politiche di scadenza disponibili: `until_level_change`, `next_slot`,
+`duration`, `until_scenario_change`, `sticky`.
+
+**`until_level_change` è quella di chi mette le mani sul termostato**, dalla
+manopola o dal pannello: l'override vale finché il programma tiene la stessa
+fascia. Alzare la temperatura alle 07:05 la tiene per tutta la mattina, non per
+venticinque minuti; al primo cambio di livello il programma riprende. Le altre
+si ottengono da `ctha.set_override`.
 
 Un watchdog riscrive i setpoint desiderati ogni 12 minuti, scaglionando le
 scritture di 1.5 s fra una zona e l'altra per non saturare il bus. Scrive solo
@@ -68,8 +74,9 @@ condizioni normali sul bus non passa traffico.
 
 Ogni cambio di setpoint che non sia l'eco di una scrittura di CTHA è qualcun
 altro che ha messo mano alla zona — la manopola, l'app del costruttore, la
-centrale. Diventa un override fino alla fine della mezz'ora corrente, non un
-errore da correggere all'istante.
+centrale. Diventa un override per la fascia in corso, non un errore da
+correggere all'istante. Il rovescio: finché il programma della centrale 3550
+non è appiattito, anche una sua riasserzione dura quanto la fascia.
 
 ## Funzionalità
 

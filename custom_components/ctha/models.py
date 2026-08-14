@@ -244,6 +244,12 @@ class Override:
     `source` distingue chi lo ha prodotto (noi, un'app esterna, la manopola
     fisica) perché i tre casi si trattano in modo diverso; `policy` e
     `expires_at` descrivono quando decade.
+
+    `scenario_id` e `level` sono la memoria di com'era il mondo quando
+    l'override è nato: le policy che scadono su un *cambiamento* — di scenario,
+    di fascia — non hanno altro modo di accorgersi che il cambiamento è
+    avvenuto. `level` può essere legittimamente `None`: lo slot che eredita non
+    impone nessuna fascia, ed è uno stato da cui si può comunque uscire.
     """
 
     zone_id: str
@@ -253,6 +259,7 @@ class Override:
     created_at: datetime | None = None
     expires_at: datetime | None = None
     scenario_id: str | None = None
+    level: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serializza l'override; i datetime diventano stringhe ISO."""
@@ -264,6 +271,7 @@ class Override:
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "scenario_id": self.scenario_id,
+            "level": self.level,
         }
 
     @classmethod
@@ -277,6 +285,7 @@ class Override:
             created_at=_parse_dt(data.get("created_at")),
             expires_at=_parse_dt(data.get("expires_at")),
             scenario_id=data.get("scenario_id"),
+            level=data.get("level"),
         )
 
 

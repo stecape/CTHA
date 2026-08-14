@@ -97,12 +97,16 @@ OVERRIDE_SOURCE_HARDWARE: Final = "hardware"
 
 # Politiche di scadenza.
 POLICY_NEXT_SLOT: Final = "next_slot"
+# Dura finché il programma tiene lo stesso livello: una mano sul termostato
+# alle 07:05 vale per tutta la fascia del mattino, non venticinque minuti.
+POLICY_UNTIL_LEVEL_CHANGE: Final = "until_level_change"
 POLICY_DURATION: Final = "duration"
 POLICY_UNTIL_SCENARIO_CHANGE: Final = "until_scenario_change"
 POLICY_STICKY: Final = "sticky"
 
 OVERRIDE_POLICIES: Final[tuple[str, ...]] = (
     POLICY_NEXT_SLOT,
+    POLICY_UNTIL_LEVEL_CHANGE,
     POLICY_DURATION,
     POLICY_UNTIL_SCENARIO_CHANGE,
     POLICY_STICKY,
