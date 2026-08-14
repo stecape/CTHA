@@ -8,8 +8,22 @@ Stefano sta sviluppando un componente custom per Home Assistant per gestire
 un impianto di riscaldamento a pavimento radiante multi-zona. L'impianto
 prevede 10 zone BTicino integrate tramite l'integrazione MyHOME (di
 anotherjulien), con 9 zone attive più un'unità centrale (#0), tutte
-configurate come `standalone: False`, con sensori dei termostati fisici
-BTicino F430/4 e centrale modello 3550.
+configurate come `standalone: False`.
+
+**Chi fa cosa nell'impianto**, perché ogni scelta di CTHA discende da qui:
+
+- **sonde 4691** — una per zona, misurano la temperatura e portano la manopola
+  con l'offset locale. Sono la «zona» che MyHOME espone come entità `climate`;
+- **attuatori F430/4** — comandano le testine motorizzate delle valvole;
+- **centrale 3550** — è il **regolatore**: confronta la misura delle sonde con
+  il setpoint e pilota le testine attraverso gli attuatori. Tutte le zone sono
+  in configurazione `CEN`, cioè le sonde sono sue.
+
+La conseguenza da tenere sempre presente: **la 3550 non è solo una fonte di
+conflitto, è il regolatore da cui CTHA dipende.** Non si può toglierla dal giro
+— senza di lei nessuno comanda le testine. Il conflitto con lei non è su *chi
+regola*, è solo su *quale setpoint*, e riguarda unicamente il suo programma
+settimanale che riasserisce i propri valori ai propri confini orari.
 
 L'obiettivo del progetto è un sistema di programmazione e override completo
 che gli strumenti nativi di HA non coprono: programmazione settimanale
@@ -28,17 +42,18 @@ superiore quando non dicono nulla.
 **Nota sullo stato del codice**: l'architettura target è implementata in
 `custom_components/ctha/` (modello dati a riferimenti, risoluzione su due assi,
 override con soppressione echo, persistenza su Store, watchdog di
-riconciliazione, modifica del programma, servizi, scrittura del setpoint sul
-termostato di zona) e in `frontend/` (pannello React in sidebar con la griglia
-di programmazione). Resta fuori la lettura dei messaggi di offset locale
-dell'F430/4, che richiede di entrare dentro MyHOME.
+riconciliazione, modifica del programma, servizi, scrittura del setpoint sulla
+zona) e in `frontend/` (pannello React in sidebar con la griglia di
+programmazione). Resta fuori la lettura dei messaggi di offset locale della
+sonda 4691, che richiede di entrare dentro MyHOME.
 
 **CTHA non regola: programma.** Una zona *è* una entità `climate` che già
-esiste — l'F430/4 esposto da MyHOME. Quel termostato misura la temperatura e
-comanda la valvola; CTHA gli dice solo quale setpoint tenere, scrivendo
-`climate.set_temperature`. Non esiste isteresi nel componente, e non deve
-tornarci: quel livello lo copre già `generic_thermostat` di HA core, e per
-questo impianto è il livello sbagliato.
+esiste — quella che MyHOME espone per la zona BTicino. Misura e regolazione
+esistono già nell'impianto: la sonda misura, la 3550 confronta e comanda le
+testine. Quello che manca è *quale setpoint tenere e quando*, ed è l'unica cosa
+che CTHA fornisce, scrivendo `climate.set_temperature`. Non esiste isteresi nel
+componente, e non deve tornarci: qui la farebbe due volte, perché la centrale la
+sta già facendo.
 
 Dominio dell'integrazione: `ctha`. Tipo: `helper`, `iot_class: local_push`.
 
@@ -352,7 +367,7 @@ progressive. Stato attuale di ciascun pezzo:
   - scritture avviate da HA: soppresse tramite rilevamento echo (finestra di
     60 secondi, tolleranza deadband di 0.15 °C);
   - scritture da app esterne/unità centrale: rilevabili e con scadenza;
-  - regolazioni manuali sulla manopola fisica F430/4: un offset hardware
+  - regolazioni manuali sulla manopola della sonda 4691: un offset hardware
     persistente che non può essere annullato via software — può solo essere
     compensato o mostrato nell'interfaccia. Nel codice: `source = hardware`,
     mai soggetto a scadenza.
@@ -360,9 +375,12 @@ progressive. Stato attuale di ciascun pezzo:
     manuali), `next_slot`, `duration`, `until_scenario_change` e `sticky`.
 - **Mitigazione dei conflitti con l'unità centrale 3550**: il loop di
   riconciliazione watchdog è *fatto* (`coordinator.py`, `RECONCILE_INTERVAL`
-  = 12 min, scritture scaglionate di `WRITE_STAGGER_SECONDS` = 1.5 s).
-  L'appiattimento del programma settimanale della 3550 stessa è *da fare* e
-  richiede l'adattatore MyHOME.
+  = 12 min, scritture scaglionate di `WRITE_STAGGER_SECONDS` = 1.5 s). Resta
+  *da fare* la parte che non è software: mettere la 3550 in una modalità che
+  **regoli senza programmare**, cioè Manuale su tutte le zone (manuale
+  d'installazione §5.1.2, «temperatura fissa senza fasce orarie»). Il programma
+  settimanale della centrale è l'unica cosa che riasserisce setpoint ai propri
+  confini orari; la sua regolazione, invece, serve e va lasciata lavorare.
 - **Servizi HA** — *fatti*: 15 servizi, elencati nel README. Oltre agli
   override coprono livelli di temperatura (`set_level`, `delete_level`),
   setpoint per ambito (`set_setpoint`), giornate tipo (`set_day_template`,
@@ -383,9 +401,13 @@ progressive. Stato attuale di ciascun pezzo:
 
 ## Prossimi passi
 
-- Lettura dei messaggi di offset locale dell'F430/4, per distinguere la manopola
-  fisica dalle altre sorgenti esterne. È l'ultimo pezzo che richiede di entrare
-  dentro MyHOME
+- Lettura dei messaggi di offset locale della sonda 4691, per distinguere la
+  manopola fisica dalle altre sorgenti esterne. È l'ultimo pezzo che richiede di
+  entrare dentro MyHOME
+- Mettere la 3550 in Manuale su tutte le zone e verificare col log di debug che
+  le riasserzioni simultanee su più zone spariscano. È la firma che distingue la
+  centrale dalla manopola: la manopola muove una zona, la centrale ne muove
+  molte nello stesso istante
 - Probabile necessità di fare un fork personale dell'integrazione MyHOME,
   poiché il progetto upstream è di fatto non mantenuto dall'inizio del 2024
 - Test con `pytest-homeassistant-custom-component` per la parte che tocca HA:
@@ -398,22 +420,29 @@ progressive. Stato attuale di ciascun pezzo:
 ## Apprendimenti e principi chiave
 
 - **MyHOME espone ogni zona come entità `climate`, non come sensore più
-  attuatore.** Il gateway F454 è l'integrazione; sotto ci sono i dispositivi
-  F430/4, e ciascuno diventa una entità `climate` con `current_temperature`,
-  `temperature`, `hvac_action` e le modalità spento/automatico/caldo. Non
-  esistono `sensor` separati con `device_class: temperature`. La prima versione
-  del config flow li chiedeva ed era inconfigurabile su un impianto reale: il
-  menù delle entità restava vuoto. Verificato sull'impianto di Stefano il
-  13 agosto 2026.
+  attuatore.** Il gateway F454 è l'integrazione; sotto, l'unità di modello è la
+  *zona*, non il singolo apparecchio, e diventa una entità `climate` con
+  `current_temperature`, `temperature`, `hvac_action` e le modalità
+  spento/automatico/caldo. Non esistono `sensor` separati con
+  `device_class: temperature`. La prima versione del config flow li chiedeva ed
+  era inconfigurabile su un impianto reale: il menù delle entità restava vuoto.
+  Verificato sull'impianto di Stefano il 13 agosto 2026.
+- **Nell'impianto la regolazione non è distribuita, è nella centrale.** La sonda
+  4691 misura, la 3550 confronta col setpoint e comanda le testine motorizzate
+  attraverso gli attuatori F430/4. Da qui due conseguenze che vale la pena non
+  riscoprire: la centrale non si può togliere di mezzo (senza di lei le testine
+  non ricevono comandi), e su BTicino `auto` significa «segui il programma
+  settimanale della centrale» mentre `heat` significa «tieni il setpoint» — che
+  è la ragione per cui `_heating_mode()` preferisce `heat`.
 - L'integrazione MyHOME gestisce effettivamente i messaggi di offset locale
-  dalla manopola fisica F430/4 — confermato ispezionando direttamente il
+  dalla manopola della sonda — confermato ispezionando direttamente il
   repository GitHub.
-- La riasserzione del proprio programma settimanale da parte dell'unità
-  centrale 3550 è una fonte primaria di conflitti e va neutralizzata
-  attivamente.
-- Gli offset della manopola del termostato fisico sono una questione a
-  livello hardware: nessun comando software può annullarli, solo
-  compensarli o visualizzarli.
+- La riasserzione del proprio *programma settimanale* da parte della 3550 è una
+  fonte primaria di conflitti e va neutralizzata attivamente. Neutralizzare il
+  programma, però, non vuol dire neutralizzare la centrale: quella regola, e
+  serve.
+- Gli offset della manopola della sonda sono una questione a livello hardware:
+  nessun comando software può annullarli, solo compensarli o visualizzarli.
 - Il rilevamento echo e la tolleranza deadband (0.15 °C) sono necessari per
   prevenire loop di feedback tra override e scritture.
 - Il fatto che l'integrazione MyHOME upstream non sia mantenuta rende un

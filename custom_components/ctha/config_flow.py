@@ -26,10 +26,9 @@ STEP_USER_SCHEMA = vol.Schema(
 class CthaConfigFlow(ConfigFlow, domain=DOMAIN):
     """Configura una zona CTHA sopra a un termostato esistente.
 
-    Non si chiedono sensore e attuatore: il termostato di zona (per BTicino
-    l'F430/4 esposto da MyHOME) misura già la temperatura e comanda già la
-    valvola. Quello che manca, e che CTHA aggiunge, è *quale setpoint tenere e
-    quando*.
+    Non si chiedono sensore e attuatore: la zona (per BTicino quella esposta da
+    MyHOME) misura già la temperatura e ha già chi le regola le valvole. Quello
+    che manca, e che CTHA aggiunge, è *quale setpoint tenere e quando*.
     """
 
     VERSION = 1

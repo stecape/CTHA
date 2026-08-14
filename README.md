@@ -5,10 +5,10 @@ un programma settimanale a scenari decide quale temperatura tenere in ogni zona,
 con override temporanei e riconciliazione periodica dei setpoint.
 
 **CTHA non regola la temperatura: programma il setpoint.** Una zona è un
-termostato che già esiste in Home Assistant — per un impianto BTicino, l'F430/4
-esposto dall'integrazione MyHOME. Quel termostato misura già la temperatura e
-comanda già la valvola; quello che gli manca è *quale setpoint tenere e quando*,
-ed è l'unica cosa che CTHA gli fornisce.
+termostato che già esiste in Home Assistant — per un impianto BTicino, la zona
+esposta dall'integrazione MyHOME. L'impianto misura già la temperatura e comanda
+già le valvole; quello che gli manca è *quale setpoint tenere e quando*, ed è
+l'unica cosa che CTHA gli fornisce.
 
 ## Stato
 
@@ -103,8 +103,16 @@ non è appiattito, anche una sua riasserzione dura quanto la fascia.
 
 Su impianto BTicino le entità arrivano dall'integrazione
 [MyHOME](https://github.com/anotherjulien/MyHOME): il gateway F454 espone una
-entità `climate` per ogni termostato di zona F430/4. CTHA non richiede sensori
-di temperatura separati — la misura sta già negli attributi di quelle entità.
+entità `climate` per ogni zona di termoregolazione. CTHA non richiede sensori di
+temperatura separati — la misura sta già negli attributi di quelle entità.
+
+In un impianto con centrale, i ruoli restano quelli dell'impianto: la **sonda di
+zona** (4691) misura e porta la manopola, gli **attuatori** (F430/4) comandano le
+testine motorizzate, e la **centrale** (3550) regola, cioè confronta misura e
+setpoint e decide quando aprire. CTHA non sostituisce nessuno dei tre: scrive il
+setpoint e basta. Perché non litighi con la centrale, il suo *programma
+settimanale* va messo a riposo — Modalità → Manuale su tutte le zone — mentre la
+sua regolazione va lasciata lavorare.
 
 ## Installazione
 
@@ -386,8 +394,8 @@ npm run watch     # ricompila a ogni salvataggio
 - [x] Scrittura del setpoint sul termostato di zona
 - [x] Livelli di temperatura definibili dall'utente
 - [x] Scenari come configurazione delle zone ed ereditarietà a cinque livelli
-- [ ] Lettura dei messaggi di offset locale dell'F430/4, per distinguere la
-      manopola fisica (override `hardware`) dalle altre sorgenti esterne
+- [ ] Lettura dei messaggi di offset locale della sonda di zona, per distinguere
+      la manopola fisica (override `hardware`) dalle altre sorgenti esterne
 - [ ] Appiattimento del programma dell'unità centrale 3550
 - [ ] Test della parte che tocca HA con `pytest-homeassistant-custom-component`
 

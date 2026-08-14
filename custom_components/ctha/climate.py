@@ -1,9 +1,10 @@
 """Entità climate di CTHA: una zona programmata sopra a un termostato esistente.
 
-CTHA non regola nulla da sé. Il termostato di zona — per l'impianto BTicino
-l'F430/4 esposto da MyHOME — misura già la temperatura e comanda già la valvola:
-quello che gli manca è *quale setpoint tenere e quando*, ed è l'unica cosa che
-questa entità gli fornisce, scrivendo `climate.set_temperature`.
+CTHA non regola nulla da sé. L'impianto misura già la temperatura e comanda già
+le valvole — sull'impianto BTicino la sonda di zona misura, la centrale 3550
+confronta col setpoint e pilota le testine attraverso gli attuatori. Quello che
+manca è *quale setpoint tenere e quando*, ed è l'unica cosa che questa entità
+fornisce, scrivendo `climate.set_temperature` sull'entità di zona di MyHOME.
 
 Da qui discendono due comportamenti che sembrano dettagli e non lo sono:
 
@@ -157,7 +158,7 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
 
     @property
     def current_temperature(self) -> float | None:
-        """Temperatura misurata dal termostato di zona."""
+        """Temperatura misurata nella zona, così come la riporta il bus."""
         state = self._target_state
         if state is None:
             return None
