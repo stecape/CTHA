@@ -304,6 +304,27 @@ label.field {
   border-color: var(--ctha-divider);
 }
 
+/* Un pulsante «Temperature» che porta un conteggio: il badge dice quante ne
+   sono state scritte su quell'elemento, e distingue a colpo d'occhio chi
+   sovrascrive da chi eredita tutto. */
+.btn .badge {
+  margin-left: 6px;
+}
+
+.btn[aria-pressed="true"] {
+  border-color: var(--ctha-accent);
+}
+
+.hierarchy {
+  margin: 0 0 12px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  color: var(--ctha-muted);
+}
+
 .row-cells {
   display: grid;
   grid-template-columns: repeat(48, 1fr);

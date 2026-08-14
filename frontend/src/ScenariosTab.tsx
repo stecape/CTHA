@@ -8,12 +8,8 @@
 import { useState } from "react";
 
 import { api } from "./api";
-import {
-  freeId,
-  ownSetpointCount,
-  slugify,
-  sortedWeekTemplates,
-} from "./model";
+import { freeId, slugify, sortedWeekTemplates } from "./model";
+import { SetpointsButton } from "./Setpoints";
 import type { Run, Snapshot } from "./types";
 import { Card, PromptModal } from "./ui";
 
@@ -26,7 +22,7 @@ export function ScenariosTab({
   snapshot: Snapshot;
   run: Run;
 }) {
-  const { program } = snapshot;
+  const { program, meta } = snapshot;
   const [prompt, setPrompt] = useState<Prompt | null>(null);
   const zones = Object.values(program.zones);
   const weeks = sortedWeekTemplates(program);
@@ -48,7 +44,7 @@ export function ScenariosTab({
     <>
       <Card
         title="Scenari"
-        hint="Uno scenario dice, per ogni zona, quale settimana tipo seguire. Uno scenario nuovo parte dalla configurazione di quello attivo."
+        hint="Uno scenario dice, per ogni zona, quale settimana tipo seguire. Uno scenario nuovo parte dalla configurazione di quello attivo. Attenzione: la settimana tipo è un'assegnazione di questo scenario, le temperature di una zona invece sono della zona e valgono in tutti."
         actions={
           <button className="btn" onClick={() => setPrompt({ kind: "new" })}>
             + Nuovo
@@ -65,7 +61,6 @@ export function ScenariosTab({
         <div className="list">
           {Object.values(program.scenarios).map((scenario) => {
             const isActive = scenario.id === program.active_scenario;
-            const own = ownSetpointCount(scenario.setpoints);
             return (
               <div className="item column" key={scenario.id}>
                 <div className="item-head">
@@ -73,20 +68,16 @@ export function ScenariosTab({
                     <strong>
                       {scenario.name}{" "}
                       {isActive && <span className="badge">attivo</span>}
-                      {own > 0 && (
-                        <>
-                          {" "}
-                          <span
-                            className="badge"
-                            title="Sovrascrive le temperature globali"
-                          >
-                            {own} temperature proprie
-                          </span>
-                        </>
-                      )}
                     </strong>
                   </div>
                   <div className="item-actions">
+                    <SetpointsButton
+                      program={program}
+                      meta={meta}
+                      scope={{ layer: "scenario", id: scenario.id }}
+                      name={`scenario «${scenario.name}»`}
+                      run={run}
+                    />
                     <button
                       className="btn small"
                       onClick={() =>
@@ -135,6 +126,7 @@ export function ScenariosTab({
                       <tr>
                         <th>Zona</th>
                         <th>Settimana tipo</th>
+                        <th>Temperature della zona</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -169,6 +161,15 @@ export function ScenariosTab({
                                   </option>
                                 ))}
                               </select>
+                            </td>
+                            <td>
+                              <SetpointsButton
+                                program={program}
+                                meta={meta}
+                                scope={{ layer: "zone", id: zone.id }}
+                                name={`zona «${zone.name}»`}
+                                run={run}
+                              />
                             </td>
                           </tr>
                         );

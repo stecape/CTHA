@@ -256,16 +256,61 @@ assert.deepEqual(JSON.parse(JSON.stringify(calls[calls.length - 1])), {
   },
 });
 
-// --- Temperature: livelli e gerarchia --------------------------------------
+// --- Le temperature si modificano sull'istanza -----------------------------
+
+// Il pulsante sta accanto all'elemento, non in un editor centrale: qui, sullo
+// scenario, e apre le temperature di *quello* scenario.
+const scenarioTemps = query(".item.column .item-head .btn").find((node) =>
+  node.textContent.startsWith("Temperature"),
+);
+assert.ok(scenarioTemps, "lo scenario deve avere il suo pulsante Temperature");
+click(scenarioTemps);
+await settle();
+
+assert.ok(
+  text().includes("Temperature — scenario «Normale»"),
+  "la finestra deve dire di quale istanza sono le temperature",
+);
+assert.ok(
+  text().includes("dal globale «Globale»"),
+  "e da dove eredita ogni livello che non sovrascrive",
+);
+
+const [close] = query(".dialog-actions .btn").filter(
+  (node) => node.textContent === "Chiudi",
+);
+click(close);
+await settle();
+
+// Ogni zona ha il proprio pulsante nella riga della tabella: le temperature di
+// una zona sono della zona, non della settimana tipo che le è assegnata.
+assert.ok(
+  query(".item.column table .btn").some((node) =>
+    node.textContent.startsWith("Temperature"),
+  ),
+  "ogni zona deve avere il suo pulsante Temperature",
+);
+
+// --- Temperature: livelli e sovrascritture ---------------------------------
 
 await openTab("Temperature");
 
 assert.ok(
-  text().includes("Gerarchia delle temperature"),
-  "la vista delle temperature deve mostrare la gerarchia",
+  text().includes("Livelli di temperatura"),
+  "la vista delle temperature deve mostrare i livelli",
 );
 assert.ok(text().includes("Antigelo"), "e tutti i livelli esistenti");
 
+// L'elenco dice *dove* è stata scritta una temperatura: lo scenario Vacanza e
+// la zona Soggiorno sovrascrivono «alta».
+assert.ok(text().includes("Sovrascritture"), "e l'elenco delle sovrascritture");
+for (const expected of ["Vacanza", "Soggiorno", "17.0 °C", "22.0 °C"]) {
+  assert.ok(
+    text().includes(expected),
+    `l'elenco delle sovrascritture deve contenere "${expected}"`,
+  );
+}
+
 console.log(
-  "smoke: pannello montato, griglia disegnata, pennellata inoltrata, scenari e gerarchia visibili",
+  "smoke: pannello montato, griglia disegnata, pennellata inoltrata, scenari e temperature per istanza",
 );

@@ -19,6 +19,7 @@ import {
   paintedSlots,
   sharedWith,
 } from "./model";
+import { SetpointsButton } from "./Setpoints";
 import { Templates } from "./Templates";
 import type { LevelId, Program, Run, Snapshot } from "./types";
 import { Card, Modal } from "./ui";
@@ -146,19 +147,30 @@ export function ProgramTab({
         title="Programma settimanale"
         hint="Scegli un pennello e trascina sulla riga di un giorno. Un trascinamento è un intervallo: dalle 07:00 alle 09:00 è un gesto solo."
         actions={
-          <label className="field">
-            Settimana tipo
-            <select
-              value={weekId}
-              onChange={(event) => setWeekId(event.target.value)}
-            >
-              {Object.values(program.week_templates).map((template) => (
-                <option key={template.id} value={template.id}>
-                  {template.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <>
+            <label className="field">
+              Settimana tipo
+              <select
+                value={weekId}
+                onChange={(event) => setWeekId(event.target.value)}
+              >
+                {Object.values(program.week_templates).map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {week && (
+              <SetpointsButton
+                program={program}
+                meta={snapshot.meta}
+                scope={{ layer: "week_template", id: week.id }}
+                name={`settimana tipo «${week.name}»`}
+                run={run}
+              />
+            )}
+          </>
         }
       >
         <div className="brushes">
@@ -221,7 +233,7 @@ export function ProgramTab({
         )}
       </Card>
 
-      <Templates program={program} run={run} />
+      <Templates program={program} meta={snapshot.meta} run={run} />
 
       {conflict && (
         <ConflictDialog

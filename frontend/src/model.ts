@@ -297,6 +297,42 @@ export function ownSetpointCount(setpoints: Setpoints): number {
   return Object.keys(setpoints).length;
 }
 
+export interface Written {
+  scope: Scope;
+  name: string;
+  setpoints: Setpoints;
+}
+
+/**
+ * Ogni elemento che sovrascrive qualche temperatura, dal più generale in giù.
+ *
+ * Le temperature si modificano sull'istanza, ognuna nel proprio posto: senza
+ * un elenco così, per sapere *dove* è stato scritto qualcosa bisognerebbe
+ * aprire tutti gli elementi uno per uno.
+ */
+export function writtenSetpoints(program: Program): Written[] {
+  const written: Written[] = [];
+  const add = (layer: Layer, id: string, name: string, setpoints: Setpoints) => {
+    if (Object.keys(setpoints).length > 0) {
+      written.push({ scope: { layer, id }, name, setpoints });
+    }
+  };
+
+  for (const item of Object.values(program.scenarios)) {
+    add("scenario", item.id, item.name, item.setpoints);
+  }
+  for (const item of Object.values(program.zones)) {
+    add("zone", item.id, item.name, item.setpoints);
+  }
+  for (const item of sortedWeekTemplates(program)) {
+    add("week_template", item.id, item.name, item.setpoints);
+  }
+  for (const item of sortedDayTemplates(program)) {
+    add("day_template", item.id, item.name, item.setpoints);
+  }
+  return written;
+}
+
 /** Settimana tipo che una zona segue nello scenario attivo. */
 export function weekTemplateForZone(
   program: Program,

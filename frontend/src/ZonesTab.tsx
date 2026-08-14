@@ -10,6 +10,7 @@ import { useState } from "react";
 
 import { api } from "./api";
 import { LAYER_LABEL, formatTemp, sortedWeekTemplates } from "./model";
+import { SetpointsButton } from "./Setpoints";
 import type { HomeAssistant, Override, Policy, Run, Snapshot } from "./types";
 import { Card, NumberField } from "./ui";
 
@@ -140,6 +141,16 @@ export function ZonesTab({
                   }
                 />
               )}
+
+              <div className="item-actions">
+                <SetpointsButton
+                  program={program}
+                  meta={meta}
+                  scope={{ layer: "zone", id: zone.id }}
+                  name={`zona «${zone.name}»`}
+                  run={run}
+                />
+              </div>
 
               <label className="field">
                 Settimana tipo in «{scenario?.name ?? program.active_scenario}»

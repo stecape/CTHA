@@ -145,14 +145,25 @@ amministratori). Quattro viste, che ricalcano l'architettura:
 - **Scenari** — la configurazione delle zone. Per ogni scenario la tabella zona
   → settimana tipo, per intero: prima di attivare uno scenario si vede cosa
   farà a ciascuna zona.
-- **Temperature** — l'asse termico. I livelli (nome, colore, setpoint globale,
-  creazione ed eliminazione) e l'editor della gerarchia: si sceglie un punto —
-  globale, scenario, zona, settimana tipo, giornata tipo — e per ogni livello si
-  vede il valore proprio, quello che erediterebbe e da chi, e quello in vigore.
-  Un campo vuoto eredita; svuotarlo è il modo di tornare a ereditare.
+- **Temperature** — i livelli (nome, colore, setpoint globale, creazione ed
+  eliminazione) e l'elenco di *dove* sono state scritte le sovrascritture.
 - **Zone** — lo stato adesso: temperatura misurata, setpoint applicato, da quale
   livello della gerarchia viene, che programma sta seguendo, e l'eventuale
   override con la sua scadenza.
+
+**Le temperature si modificano sull'istanza.** Ogni elemento che può
+sovrascrivere una temperatura ha accanto a sé un pulsante **Temperature**, col
+numero di quelle proprie: lo scenario nella sua intestazione, la zona nella
+tabella dello scenario e nella propria scheda, la settimana tipo accanto al
+selettore in *Programma* e nel suo elenco, la giornata tipo nel suo elenco. Il
+pulsante apre sempre la stessa finestra, che per ogni livello mostra il valore
+proprio, quello che erediterebbe e da chi, e quello in vigore. Un campo vuoto
+eredita; svuotarlo è il modo di tornare a ereditare.
+
+Non c'è un editor centrale con un menù «scegli il punto della gerarchia»:
+sarebbe più compatto ma direbbe la cosa sbagliata. Le sovrascritture
+appartengono all'elemento — due settimane tipo hanno temperature diverse perché
+sono due settimane tipo.
 
 **Le giornate tipo sono condivise.** Una riga marcata *condivisa* usa lo stesso
 template di altri giorni: dipingerla li cambia tutti. Il pannello se ne accorge

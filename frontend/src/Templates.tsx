@@ -12,13 +12,13 @@ import {
   freeId,
   levelAt,
   listDays,
-  ownSetpointCount,
   slugify,
   sortedDayTemplates,
   sortedWeekTemplates,
   weekTemplateUsages,
 } from "./model";
-import type { Program, Run } from "./types";
+import { SetpointsButton } from "./Setpoints";
+import type { Meta, Program, Run } from "./types";
 import { Card, PromptModal } from "./ui";
 
 type Prompt =
@@ -27,7 +27,15 @@ type Prompt =
   | { kind: "rename-day"; id: string; name: string }
   | { kind: "rename-week"; id: string; name: string };
 
-export function Templates({ program, run }: { program: Program; run: Run }) {
+export function Templates({
+  program,
+  meta,
+  run,
+}: {
+  program: Program;
+  meta: Meta;
+  run: Run;
+}) {
   const [prompt, setPrompt] = useState<Prompt | null>(null);
 
   const onPrompt = (value: string) => {
@@ -75,24 +83,10 @@ export function Templates({ program, run }: { program: Program; run: Run }) {
           {sortedDayTemplates(program).map((template) => {
             const usages = dayTemplateUsages(program, template.id);
             const used = usages.length > 0;
-            const own = ownSetpointCount(template.setpoints);
             return (
               <div className="item" key={template.id}>
                 <div className="item-main">
-                  <strong>
-                    {template.name}
-                    {own > 0 && (
-                      <>
-                        {" "}
-                        <span
-                          className="badge"
-                          title="Sovrascrive le temperature di chi la usa"
-                        >
-                          {own} temperature proprie
-                        </span>
-                      </>
-                    )}
-                  </strong>
+                  <strong>{template.name}</strong>
                   <span className="hint">
                     {used
                       ? usages
@@ -106,6 +100,13 @@ export function Templates({ program, run }: { program: Program; run: Run }) {
                   <SlotsPreview program={program} slots={template.slots} />
                 </div>
                 <div className="item-actions">
+                  <SetpointsButton
+                    program={program}
+                    meta={meta}
+                    scope={{ layer: "day_template", id: template.id }}
+                    name={`giornata tipo «${template.name}»`}
+                    run={run}
+                  />
                   <button
                     className="btn small"
                     onClick={() =>
@@ -169,24 +170,10 @@ export function Templates({ program, run }: { program: Program; run: Run }) {
           {sortedWeekTemplates(program).map((template) => {
             const usages = weekTemplateUsages(program, template.id);
             const used = usages.length > 0;
-            const own = ownSetpointCount(template.setpoints);
             return (
               <div className="item" key={template.id}>
                 <div className="item-main">
-                  <strong>
-                    {template.name}
-                    {own > 0 && (
-                      <>
-                        {" "}
-                        <span
-                          className="badge"
-                          title="Sovrascrive le temperature delle zone che la seguono"
-                        >
-                          {own} temperature proprie
-                        </span>
-                      </>
-                    )}
-                  </strong>
+                  <strong>{template.name}</strong>
                   <span className="hint">
                     {used
                       ? usages
@@ -199,6 +186,13 @@ export function Templates({ program, run }: { program: Program; run: Run }) {
                   </span>
                 </div>
                 <div className="item-actions">
+                  <SetpointsButton
+                    program={program}
+                    meta={meta}
+                    scope={{ layer: "week_template", id: template.id }}
+                    name={`settimana tipo «${template.name}»`}
+                    run={run}
+                  />
                   <button
                     className="btn small"
                     onClick={() =>

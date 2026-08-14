@@ -233,6 +233,18 @@ Il frontend è React dentro un Web Component su shadow root (`frontend/src/`):
 - Il momento in cui si chiede "modifica per tutti o scollega?" è la pennellata
   su una giornata tipo condivisa (`ProgramTab.tsx`): è lì che l'utente scopre
   la condivisione, ed è lì che ha senso offrire la scappatoia.
+- `Setpoints.tsx` è **un** editor usato da cinque posti. Le sovrascritture si
+  modificano sull'istanza — pulsante «Temperature» accanto all'elemento, col
+  numero di quelle proprie — e non da un menù «scegli il punto della gerarchia»:
+  quel menù sarebbe più compatto ma direbbe che le temperature stanno altrove,
+  mentre appartengono all'elemento. La vista Temperature tiene solo ciò che non
+  è di nessun elemento (quali livelli esistono, quanto valgono alla radice) più
+  l'elenco di *dove* è stato scritto qualcosa, che altrimenti si scoprirebbe
+  aprendo gli elementi uno per uno.
+  - Attenzione a un'ambiguità che la UI deve dire a voce: il pulsante di una
+    zona compare anche dentro la tabella di uno scenario, ma le temperature di
+    una zona sono **della zona** e valgono in tutti gli scenari — solo la
+    settimana tipo è un'assegnazione di quello scenario.
 
 **Il bundle compilato è versionato.** HACS distribuisce il repository così
 com'è: dopo aver toccato `frontend/src/` bisogna rifare `npm run check` e
@@ -350,8 +362,8 @@ progressive. Stato attuale di ciascun pezzo:
   starci dentro. `paint_slots` prende un intervallo e non uno slot proprio
   perché è la primitiva su cui poggia il paint-drag della griglia.
 - **Interfaccia di programmazione** — *fatta*: quattro viste (Programma,
-  Scenari, Temperature, Zone), griglia paint-drag, editor della gerarchia con
-  valore proprio / ereditato / in vigore, vista delle dipendenze e scappatoia
+  Scenari, Temperature, Zone), griglia paint-drag, temperature modificabili
+  sull'istanza che le sovrascrive, vista delle dipendenze e scappatoia
   "duplica e scollega" al momento in cui serve.
 - **Adattatore verso il bus** — *fatto a metà*: la scrittura dei setpoint passa
   per `climate.set_temperature` sull'entità MyHOME della zona, che è tutto ciò
