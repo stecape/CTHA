@@ -4,7 +4,7 @@
 // Non sostituisce la prova dentro Home Assistant — geometria, temi e bus non
 // esistono qui. Serve a intercettare le rotture grosse: bundle che non parte,
 // custom element non registrato, render che esplode, pennellata che non arriva
-// al servizio.
+// al servizio, scenario che non mostra più la configurazione delle zone.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -22,33 +22,58 @@ const bundle = readFileSync(
 const SLOTS = 48;
 const snapshot = {
   program: {
-    global_setpoints: { comfort: 21, eco: 18, antifreeze: 7 },
+    levels: {
+      alta: { id: "alta", name: "Alta", char: "a", color: "#e0703c" },
+      media: { id: "media", name: "Media", char: "m", color: "#e0b13c" },
+      bassa: { id: "bassa", name: "Bassa", char: "b", color: "#3f9d7c" },
+      antigelo: { id: "antigelo", name: "Antigelo", char: "g", color: "#4a7fbf" },
+    },
+    global_setpoints: { alta: 21, media: 19, bassa: 17, antigelo: 7 },
     day_templates: {
       default: {
         id: "default",
         name: "Giornata tipo",
-        slots: "e".repeat(12) + "c".repeat(5) + "e".repeat(17) + "c".repeat(11) + "e".repeat(3),
+        slots:
+          "b".repeat(12) + "a".repeat(5) + "m".repeat(17) + "a".repeat(11) + "b".repeat(3),
+        setpoints: {},
       },
-      weekend: { id: "weekend", name: "Weekend", slots: "c".repeat(SLOTS) },
+      weekend: {
+        id: "weekend",
+        name: "Weekend",
+        slots: "a".repeat(SLOTS),
+        setpoints: {},
+      },
     },
     week_templates: {
       default: {
         id: "default",
         name: "Settimana tipo",
         days: { 0: "default", 1: "default", 2: "default", 3: "default", 4: "default", 5: "weekend", 6: "weekend" },
+        setpoints: {},
+      },
+      estiva: {
+        id: "estiva",
+        name: "Settimana estiva",
+        days: { 0: "weekend", 1: "weekend", 2: "weekend", 3: "weekend", 4: "weekend", 5: "weekend", 6: "weekend" },
+        setpoints: {},
       },
     },
     scenarios: {
       default: {
         id: "default",
         name: "Normale",
-        week_template: "default",
-        offset: 0,
-        zone_offsets: {},
+        zones: { z1: "default" },
+        setpoints: {},
+      },
+      vacanza: {
+        id: "vacanza",
+        name: "Vacanza",
+        zones: { z1: "estiva" },
+        setpoints: { alta: 17 },
       },
     },
     zones: {
-      z1: { id: "z1", name: "Soggiorno", setpoints: { comfort: 22 }, week_template: null },
+      z1: { id: "z1", name: "Soggiorno", setpoints: { alta: 22 } },
     },
     overrides: {},
     active_scenario: "default",
@@ -56,20 +81,22 @@ const snapshot = {
   runtime: {
     z1: {
       entity_id: "climate.soggiorno",
-      level: "comfort",
-      base: 22,
+      level: "alta",
       source: "zone",
-      offset: 0,
       scheduled: 22,
       target: 22,
+      week_template: "default",
+      day_template: "default",
+      slot: 14,
       override: null,
     },
   },
   meta: {
-    levels: ["comfort", "eco", "antifreeze"],
+    layers: ["day_template", "week_template", "zone", "scenario", "global"],
     policies: ["next_slot", "duration", "until_scenario_change", "sticky"],
     slots_per_day: SLOTS,
     slot_minutes: 30,
+    inherit_char: "-",
     min_temp: 5,
     max_temp: 30,
     temp_step: 0.5,
@@ -119,14 +146,24 @@ const panel = window.document.createElement("ctha-panel");
 panel.hass = hass;
 window.document.body.append(panel);
 
+const settle = () => new Promise((resolve) => window.setTimeout(resolve, 50));
+
 await new Promise((resolve) => window.setTimeout(resolve, 200));
 
 const shadow = panel.shadowRoot;
 assert.ok(shadow, "il pannello deve avere uno shadow root");
 
 const query = (selector) => [...shadow.querySelectorAll(selector)];
+const click = (node) =>
+  node.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+const openTab = async (label) => {
+  const tab = query(".tab").find((node) => node.textContent === label);
+  assert.ok(tab, `manca la vista "${label}"`);
+  click(tab);
+  await settle();
+};
 
-assert.equal(query(".tab").length, 3, "tre viste");
+assert.equal(query(".tab").length, 4, "quattro viste");
 assert.equal(query(".row-cells").length, 7, "una riga per giorno");
 assert.equal(
   query(".row-cells .cell").length,
@@ -134,10 +171,13 @@ assert.equal(
   "48 slot per ogni giorno",
 );
 
-const text = shadow.textContent ?? "";
-for (const expected of ["lunedì", "domenica", "Giornata tipo", "Weekend", "Comfort"]) {
-  assert.ok(text.includes(expected), `manca "${expected}" nel pannello`);
+const text = () => shadow.textContent ?? "";
+for (const expected of ["lunedì", "domenica", "Giornata tipo", "Weekend", "Alta"]) {
+  assert.ok(text().includes(expected), `manca "${expected}" nel pannello`);
 }
+
+// I pennelli sono i livelli del modello, non tre costanti nel codice.
+assert.equal(query(".brush").length, 5, "un pennello per livello, più «eredita»");
 
 // Il badge "condivisa" deve comparire: cinque giorni usano la stessa giornata.
 assert.ok(
@@ -154,10 +194,10 @@ const press = (type) =>
 press("pointerdown");
 press("pointerup");
 
-await new Promise((resolve) => window.setTimeout(resolve, 50));
+await settle();
 
 assert.ok(
-  (shadow.textContent ?? "").includes("Questa giornata tipo è condivisa"),
+  text().includes("Questa giornata tipo è condivisa"),
   "una pennellata su un template condiviso deve chiedere cosa fare",
 );
 assert.equal(calls.length, 0, "e non deve scrivere nulla prima della risposta");
@@ -168,9 +208,9 @@ const [modifyAll] = query(".dialog-actions .btn").filter(
   (node) => node.textContent === "Modifica per tutti",
 );
 assert.ok(modifyAll, "il dialogo deve offrire di modificare per tutti");
-modifyAll.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+click(modifyAll);
 
-await new Promise((resolve) => window.setTimeout(resolve, 50));
+await settle();
 
 assert.equal(calls.length, 1, "una pennellata, una chiamata");
 // Il round-trip via JSON serve a confrontare i valori: gli oggetti nascono nel
@@ -182,8 +222,50 @@ assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), {
     template_id: "weekend",
     start_slot: 0,
     end_slot: 0,
-    level: "comfort",
+    level: "alta",
   },
 });
 
-console.log("smoke: pannello montato, griglia disegnata, pennellata inoltrata");
+// --- Scenari: la configurazione delle zone ---------------------------------
+
+await openTab("Scenari");
+
+assert.ok(text().includes("Vacanza"), "gli scenari devono comparire tutti");
+assert.ok(
+  text().includes("Soggiorno"),
+  "ogni scenario mostra la tabella delle sue zone",
+);
+
+// Riassegnare la settimana tipo di una zona dentro uno scenario passa dal
+// servizio, con lo scenario esplicito: è il gesto che *è* lo scenario.
+const assign = query(".item.column table select")[0];
+assert.ok(assign, "ogni zona deve avere il menù della settimana tipo");
+assign.value = "estiva";
+assert.equal(assign.value, "estiva", "il menù deve elencare le settimane tipo");
+assign.dispatchEvent(new window.Event("change", { bubbles: true }));
+
+await settle();
+
+assert.deepEqual(JSON.parse(JSON.stringify(calls[calls.length - 1])), {
+  domain: "ctha",
+  service: "set_zone_week_template",
+  data: {
+    zone_id: "z1",
+    template_id: "estiva",
+    scenario_id: "default",
+  },
+});
+
+// --- Temperature: livelli e gerarchia --------------------------------------
+
+await openTab("Temperature");
+
+assert.ok(
+  text().includes("Gerarchia delle temperature"),
+  "la vista delle temperature deve mostrare la gerarchia",
+);
+assert.ok(text().includes("Antigelo"), "e tutti i livelli esistenti");
+
+console.log(
+  "smoke: pannello montato, griglia disegnata, pennellata inoltrata, scenari e gerarchia visibili",
+);

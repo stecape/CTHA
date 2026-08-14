@@ -53,9 +53,6 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_TARGET,
     DOMAIN,
-    LEVEL_ANTIFREEZE,
-    LEVEL_COMFORT,
-    LEVEL_ECO,
     MAX_TEMP,
     MIN_TEMP,
     OVERRIDE_SOURCE_EXTERNAL,
@@ -64,7 +61,7 @@ from .const import (
     WRITE_DEADBAND,
 )
 from .coordinator import CthaCoordinator
-from .resolve import resolve_temperature
+from .resolve import resolve_level_temperature
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -96,7 +93,6 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
     _attr_name = None
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
-    _attr_preset_modes = [LEVEL_COMFORT, LEVEL_ECO, LEVEL_ANTIFREEZE]
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.PRESET_MODE
@@ -188,6 +184,15 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
             return None
 
     @property
+    def preset_modes(self) -> list[str]:
+        """I livelli di temperatura esistenti: sono definibili dall'utente.
+
+        L'elenco cambia quando si crea o si elimina un livello, quindi non può
+        essere una costante di classe come su un termostato a preset fissi.
+        """
+        return list(self.coordinator.data.levels)
+
+    @property
     def preset_mode(self) -> str | None:
         """Livello risolto dal programma; `None` mentre un override è attivo."""
         if self.coordinator.overrides.get(self._zone_id) is not None:
@@ -228,16 +233,17 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
         )
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Forza un livello: si traduce nell'override della sua temperatura."""
-        if preset_mode not in self._attr_preset_modes:
+        """Forza un livello: si traduce nell'override della sua temperatura.
+
+        I gradi si risolvono lungo la catena della zona in questo momento, non
+        sul globale: «alta» vale quello che vale *qui e adesso*, ed è l'unico
+        numero che l'utente si aspetta di vedere comparire.
+        """
+        if preset_mode not in self.preset_modes:
             raise ValueError(f"Preset non supportato: {preset_mode}")
 
-        zone = self.coordinator.data.zones.get(self._zone_id)
-        if zone is None:
-            return
-
-        resolution = resolve_temperature(
-            self.coordinator.data, zone, preset_mode, self.coordinator.data.active()
+        resolution = resolve_level_temperature(
+            self.coordinator.data, self._zone_id, preset_mode, dt_util.now()
         )
         if resolution.temperature is None:
             _LOGGER.warning("Nessun setpoint definito per il livello %s", preset_mode)

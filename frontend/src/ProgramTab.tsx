@@ -11,17 +11,16 @@ import { useEffect, useState } from "react";
 
 import { api } from "./api";
 import {
-  LEVELS,
-  LEVEL_LABEL,
   WEEKDAYS,
   WEEKDAYS_SHORT,
   freeId,
+  levels,
   listDays,
   paintedSlots,
   sharedWith,
 } from "./model";
 import { Templates } from "./Templates";
-import type { Level, Program, Run, Snapshot } from "./types";
+import type { LevelId, Program, Run, Snapshot } from "./types";
 import { Card, Modal } from "./ui";
 import { WeekGrid } from "./WeekGrid";
 
@@ -41,18 +40,23 @@ export function ProgramTab({
   run: Run;
 }) {
   const program = snapshot.program;
-  const activeWeek = program.scenarios[program.active_scenario]?.week_template ?? "";
+  const palette = levels(program);
+  const firstWeek = Object.keys(program.week_templates)[0] ?? "";
 
-  const [weekId, setWeekId] = useState(activeWeek);
-  const [brush, setBrush] = useState<Level | null>("comfort");
+  const [weekId, setWeekId] = useState(firstWeek);
+  // Il pennello è l'id del livello, non il livello: gli oggetti cambiano
+  // identità a ogni snapshot, l'id no.
+  const [brushId, setBrushId] = useState<LevelId | null>(palette[0]?.id ?? null);
   const [pending, setPending] = useState<Record<string, string>>({});
   const [conflict, setConflict] = useState<Conflict | null>(null);
 
+  const brush = brushId === null ? null : (program.levels[brushId] ?? null);
+
   // La settimana in modifica può sparire sotto i piedi: template eliminato da
-  // un'altra scheda, o scenario cambiato.
+  // un'altra scheda, o zona riassegnata.
   useEffect(() => {
-    if (!program.week_templates[weekId]) setWeekId(activeWeek);
-  }, [program, weekId, activeWeek]);
+    if (!program.week_templates[weekId]) setWeekId(firstWeek);
+  }, [program, weekId, firstWeek]);
 
   // Un'anteprima ottimistica vive finché il backend non conferma lo stesso
   // valore. Da lì in poi la verità è di nuovo lo snapshot.
@@ -79,7 +83,7 @@ export function ProgramTab({
       [templateId]: paintedSlots(slotsFor(templateId), start, end, brush),
     }));
     const result = await run((hass) =>
-      api.paintSlots(hass, templateId, start, end, brush),
+      api.paintSlots(hass, templateId, start, end, brushId),
     );
     if (!result.ok) dropPending(templateId);
   };
@@ -129,7 +133,7 @@ export function ProgramTab({
       [copy.template_id]: paintedSlots(copy.slots, start, end, brush),
     }));
     const painted = await run((hass) =>
-      api.paintSlots(hass, copy.template_id, start, end, brush),
+      api.paintSlots(hass, copy.template_id, start, end, brushId),
     );
     if (!painted.ok) dropPending(copy.template_id);
   };
@@ -151,7 +155,6 @@ export function ProgramTab({
               {Object.values(program.week_templates).map((template) => (
                 <option key={template.id} value={template.id}>
                   {template.name}
-                  {template.id === activeWeek ? " (in uso)" : ""}
                 </option>
               ))}
             </select>
@@ -159,24 +162,24 @@ export function ProgramTab({
         }
       >
         <div className="brushes">
-          {LEVELS.map((level) => (
+          {palette.map((level) => (
             <button
-              key={level}
+              key={level.id}
               className="brush"
-              aria-pressed={brush === level}
-              onClick={() => setBrush(level)}
+              aria-pressed={brushId === level.id}
+              onClick={() => setBrushId(level.id)}
             >
-              <span className={`swatch ${level}`} />
-              {LEVEL_LABEL[level]}
+              <span className="swatch" style={{ background: level.color }} />
+              {level.name}
               <span className="badge plain">
-                {program.global_setpoints[level]?.toFixed(1) ?? "—"} °C
+                {program.global_setpoints[level.id]?.toFixed(1) ?? "—"} °C
               </span>
             </button>
           ))}
           <button
             className="brush"
-            aria-pressed={brush === null}
-            onClick={() => setBrush(null)}
+            aria-pressed={brushId === null}
+            onClick={() => setBrushId(null)}
             title="Lo slot non impone alcun livello: la zona resta all'ultimo setpoint"
           >
             <span className="swatch inherit" />
@@ -224,7 +227,7 @@ export function ProgramTab({
         <ConflictDialog
           conflict={conflict}
           program={program}
-          brush={brush}
+          brushName={brush?.name ?? null}
           onClose={() => setConflict(null)}
           onAll={() => {
             void applyPaint(conflict.templateId, conflict.start, conflict.end);
@@ -243,14 +246,14 @@ export function ProgramTab({
 function ConflictDialog({
   conflict,
   program,
-  brush,
+  brushName,
   onClose,
   onAll,
   onDetach,
 }: {
   conflict: Conflict;
   program: Program;
-  brush: Level | null;
+  brushName: string | null;
   onClose: () => void;
   onAll: () => void;
   onDetach: () => void;
@@ -282,8 +285,8 @@ function ConflictDialog({
       </p>
       <p className="hint">
         In alternativa {day} passa a una copia indipendente, e la pennellata
-        {brush ? ` (${LEVEL_LABEL[brush].toLowerCase()})` : ""} resta solo su
-        quel giorno.
+        {brushName ? ` (${brushName.toLowerCase()})` : ""} resta solo su quel
+        giorno.
       </p>
     </Modal>
   );

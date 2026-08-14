@@ -13,7 +13,23 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN, STORAGE_KEY, STORAGE_VERSION
+from .migrate import migrate_v1_to_v2
 from .models import CthaData
+
+
+class CthaStorage(Store[dict[str, Any]]):
+    """Store che sa rileggere i formati delle versioni precedenti."""
+
+    async def _async_migrate_func(
+        self,
+        old_major_version: int,
+        old_minor_version: int,
+        old_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Porta i dati letti da disco alla forma della versione corrente."""
+        if old_major_version < 2:
+            old_data = migrate_v1_to_v2(old_data)
+        return old_data
 
 
 class CthaStore:
@@ -21,9 +37,7 @@ class CthaStore:
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Prepara lo Store senza ancora leggere da disco."""
-        self._store: Store[dict[str, Any]] = Store(
-            hass, STORAGE_VERSION, STORAGE_KEY, private=True
-        )
+        self._store = CthaStorage(hass, STORAGE_VERSION, STORAGE_KEY, private=True)
         self.data = CthaData.default()
 
     async def async_load(self) -> CthaData:

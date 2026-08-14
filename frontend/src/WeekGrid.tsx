@@ -5,11 +5,14 @@
 // funziona uguale con mouse e con dito, non serve un listener per cella, e
 // soprattutto un trascinamento resta *un* intervallo — che è esattamente ciò
 // che il servizio `paint_slots` si aspetta.
+//
+// I colori arrivano dal modello e non dal foglio di stile: i livelli si creano
+// dal pannello, quindi una classe CSS per livello non esisterebbe.
 
 import { useRef, useState } from "react";
 
-import { LEVEL_LABEL, SLOTS_PER_DAY, WEEKDAYS, levelAt, slotRange } from "./model";
-import type { Level, Program } from "./types";
+import { SLOTS_PER_DAY, WEEKDAYS, levelAt, slotRange, sortedDayTemplates } from "./model";
+import type { Program, TemperatureLevel } from "./types";
 
 interface Drag {
   weekday: number;
@@ -29,7 +32,7 @@ export function WeekGrid({
   program: Program;
   weekId: string;
   slotsFor: (templateId: string) => string;
-  brush: Level | null;
+  brush: TemperatureLevel | null;
   sharedDays: (weekday: number, templateId: string) => number;
   onPaint: (weekday: number, start: number, end: number) => void;
   onAssign: (weekday: number, templateId: string | null) => void;
@@ -68,9 +71,7 @@ export function WeekGrid({
     );
   };
 
-  const templates = Object.values(program.day_templates).sort((a, b) =>
-    a.name.localeCompare(b.name, "it"),
-  );
+  const templates = sortedDayTemplates(program);
 
   const slotAt = (element: HTMLElement, clientX: number): number => {
     const rect = element.getBoundingClientRect();
@@ -102,6 +103,7 @@ export function WeekGrid({
           return (
             <Row
               key={weekday}
+              program={program}
               name={name}
               weekday={weekday}
               slots={slots}
@@ -124,6 +126,7 @@ export function WeekGrid({
 }
 
 function Row({
+  program,
   name,
   weekday,
   slots,
@@ -138,13 +141,14 @@ function Row({
   onDragEnd,
   slotAt,
 }: {
+  program: Program;
   name: string;
   weekday: number;
   slots: string;
   shared: number;
   templateId: string;
   templates: { id: string; name: string }[];
-  brush: Level | null;
+  brush: TemperatureLevel | null;
   drag: Drag | null;
   onAssign: (weekday: number, templateId: string | null) => void;
   onDragStart: (slot: number) => void;
@@ -204,21 +208,20 @@ function Row({
           {Array.from({ length: SLOTS_PER_DAY }, (_, slot) => {
             const inPaint =
               painting !== null && slot >= painting.from && slot <= painting.to;
-            const level = inPaint ? brush : levelAt(slots, slot);
+            const level = inPaint ? brush : levelAt(program, slots, slot);
             return (
               <div
                 key={slot}
                 className={[
                   "cell",
-                  level ?? "inherit",
+                  level ? "" : "inherit",
                   slot % 2 === 1 ? "hour" : "",
                   inPaint ? "painting" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
-                title={`${slotRange(slot)} · ${
-                  level ? LEVEL_LABEL[level] : "eredita dal globale"
-                }`}
+                style={level ? { background: level.color } : undefined}
+                title={`${slotRange(slot)} · ${level ? level.name : "eredita"}`}
               />
             );
           })}

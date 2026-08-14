@@ -1,12 +1,13 @@
 """Modifica del programma: funzioni pure su `CthaData`, senza Home Assistant.
 
 Il modello è a riferimenti: un day template è citato da più giorni di più week
-template, un week template da più scenari e da singole zone. Ne discendono le
-due regole che questo modulo fa rispettare al posto del chiamante:
+template, un week template dalle zone di più scenari, un livello di temperatura
+dagli slot di più giornate tipo. Ne discendono le due regole che questo modulo
+fa rispettare al posto del chiamante:
 
-* **niente riferimenti nel vuoto** — non si può citare un template che non
-  esiste, altrimenti la risoluzione smetterebbe silenziosamente di produrre un
-  livello e la zona resterebbe ferma senza spiegazione;
+* **niente riferimenti nel vuoto** — non si può citare un template o un livello
+  che non esiste, altrimenti la risoluzione smetterebbe silenziosamente di
+  produrre un valore e la zona resterebbe ferma senza spiegazione;
 * **niente cancellazioni che spezzano il programma** — chi è ancora citato non
   si elimina, e l'errore dice *chi* lo sta usando (`Usage`), che è la stessa
   informazione della vista "chi usa questo template" nel frontend.
@@ -26,12 +27,18 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from .const import (
-    CHAR_BY_LEVEL,
     DAYS_PER_WEEK,
     DEFAULT_DAY_SLOTS,
     DEFAULT_DAY_TEMPLATE_ID,
+    DEFAULT_LEVEL_COLOR,
+    DEFAULT_LEVEL_SETPOINT,
     INHERIT_CHAR,
-    LEVELS,
+    LAYER_DAY_TEMPLATE,
+    LAYER_GLOBAL,
+    LAYER_SCENARIO,
+    LAYER_WEEK_TEMPLATE,
+    LAYER_ZONE,
+    LEVEL_CHARS,
     MAX_TEMP,
     MIN_TEMP,
     SLOTS_PER_DAY,
@@ -41,6 +48,7 @@ from .models import (
     DayTemplate,
     InvalidTemplateError,
     Scenario,
+    TemperatureLevel,
     WeekTemplate,
     Zone,
     validate_slots,
@@ -59,6 +67,7 @@ class ReferenceInUseError(ProgramError):
     """L'elemento è ancora citato da qualcun altro: eliminarlo lascerebbe un buco."""
 
 
+KIND_DAY_TEMPLATE = "day_template"
 KIND_WEEK_TEMPLATE = "week_template"
 KIND_SCENARIO = "scenario"
 KIND_ZONE = "zone"
@@ -66,6 +75,7 @@ KIND_ZONE = "zone"
 # L'identificatore del tipo resta in inglese per chi legge `Usage` da codice;
 # i messaggi che finiscono sotto gli occhi dell'utente usano queste etichette.
 KIND_LABELS: dict[str, str] = {
+    KIND_DAY_TEMPLATE: "giornata tipo",
     KIND_WEEK_TEMPLATE: "settimana tipo",
     KIND_SCENARIO: "scenario",
     KIND_ZONE: "zona",
@@ -113,18 +123,140 @@ def day_template_usages(data: CthaData, template_id: str) -> list[Usage]:
 
 
 def week_template_usages(data: CthaData, template_id: str) -> list[Usage]:
-    """Scenari e zone che seguono questa settimana tipo."""
-    usages = [
-        Usage(KIND_SCENARIO, scenario.id, scenario.name)
-        for scenario in data.scenarios.values()
-        if scenario.week_template == template_id
-    ]
-    usages += [
-        Usage(KIND_ZONE, zone.id, zone.name)
-        for zone in data.zones.values()
-        if zone.week_template == template_id
-    ]
+    """Scenari che assegnano questa settimana tipo, e a quali zone."""
+    usages = []
+    for scenario in data.scenarios.values():
+        zones = [
+            data.zones[zone_id].name if zone_id in data.zones else zone_id
+            for zone_id, week_id in scenario.zones.items()
+            if week_id == template_id
+        ]
+        if zones:
+            usages.append(
+                Usage(KIND_SCENARIO, scenario.id, scenario.name, ", ".join(zones))
+            )
     return usages
+
+
+def level_usages(data: CthaData, level_id: str) -> list[Usage]:
+    """Giornate tipo che dipingono questo livello, e in quanti slot.
+
+    Solo le giornate tipo contano: un livello citato da una tabella di setpoint
+    non tiene in piedi nulla, e la sua riga sparisce insieme al livello. Uno
+    slot dipinto invece resterebbe orfano, cioè un pezzo di programma che smette
+    di imporre qualcosa senza che nessuno l'abbia chiesto.
+    """
+    if (level := data.levels.get(level_id)) is None:
+        return []
+    usages = []
+    for template in data.day_templates.values():
+        if painted := template.slots.count(level.char):
+            usages.append(
+                Usage(
+                    KIND_DAY_TEMPLATE,
+                    template.id,
+                    template.name,
+                    f"{painted} slot",
+                )
+            )
+    return usages
+
+
+# --- Livelli di temperatura -------------------------------------------------
+
+
+def set_level(
+    data: CthaData,
+    level_id: str,
+    name: str | None = None,
+    color: str | None = None,
+    char: str | None = None,
+    setpoint: float | None = None,
+) -> TemperatureLevel:
+    """Crea o aggiorna un livello di temperatura.
+
+    Alla creazione il livello riceve un carattere libero per i day template e,
+    se non se ne indica una, una temperatura globale di partenza: il globale è
+    la radice dell'ereditarietà e un livello senza radice non produrrebbe mai
+    un setpoint.
+    """
+    if not level_id:
+        raise ProgramError("Un livello di temperatura richiede un identificatore")
+
+    if (level := data.levels.get(level_id)) is None:
+        level = TemperatureLevel(
+            id=level_id,
+            name=name or level_id,
+            char=_reserve_char(data, char, level_id),
+            color=color or DEFAULT_LEVEL_COLOR,
+        )
+        data.levels[level_id] = level
+        data.global_setpoints[level_id] = _valid_temperature(
+            DEFAULT_LEVEL_SETPOINT if setpoint is None else setpoint
+        )
+        return level
+
+    if char is not None and char != level.char:
+        raise ProgramError(
+            f"Il carattere di '{level_id}' non si cambia: è già scritto nelle "
+            "giornate tipo che lo usano"
+        )
+    if name is not None:
+        level.name = name
+    if color is not None:
+        level.color = color
+    if setpoint is not None:
+        data.global_setpoints[level_id] = _valid_temperature(setpoint)
+    return level
+
+
+def delete_level(data: CthaData, level_id: str) -> TemperatureLevel:
+    """Elimina un livello e ogni setpoint che lo riguarda, se non è dipinto."""
+    require_level(data, level_id)
+    if len(data.levels) == 1:
+        raise ReferenceInUseError("Deve restare almeno un livello di temperatura")
+    if usages := level_usages(data, level_id):
+        raise ReferenceInUseError(
+            f"Il livello '{level_id}' è ancora dipinto in: "
+            + "; ".join(str(usage) for usage in usages)
+        )
+
+    for setpoints in _all_setpoint_tables(data):
+        setpoints.pop(level_id, None)
+    return data.levels.pop(level_id)
+
+
+def set_setpoint(
+    data: CthaData,
+    level: str,
+    temperature: float | None,
+    scenario_id: str | None = None,
+    zone_id: str | None = None,
+    week_template: str | None = None,
+    day_template: str | None = None,
+) -> float | None:
+    """Scrive la temperatura di un livello a un punto preciso della gerarchia.
+
+    Senza alcun ambito si tocca il globale, e lì `None` non ha significato: un
+    livello globale senza temperatura lascerebbe senza valore tutti quelli che
+    lo ereditano. In ogni altro punto `None` è proprio il modo di dire "torna a
+    ereditare da chi sta sopra".
+    """
+    require_level(data, level)
+    layer, setpoints = _setpoint_table(
+        data, scenario_id, zone_id, week_template, day_template
+    )
+
+    if temperature is None:
+        if layer == LAYER_GLOBAL:
+            raise ProgramError(
+                f"Il setpoint globale di '{level}' non può ereditare da nessuno"
+            )
+        setpoints.pop(level, None)
+        return None
+
+    setpoints[level] = _valid_temperature(temperature)
+    return setpoints[level]
 
 
 # --- Giornate tipo ----------------------------------------------------------
@@ -145,7 +277,7 @@ def set_day_template(
         template = DayTemplate(
             id=template_id,
             name=name or template_id,
-            slots=DEFAULT_DAY_SLOTS if slots is None else _valid_slots(slots),
+            slots=_default_slots(data) if slots is None else _valid_slots(data, slots),
         )
         data.day_templates[template_id] = template
         return template
@@ -153,7 +285,7 @@ def set_day_template(
     if name is not None:
         template.name = name
     if slots is not None:
-        template.slots = _valid_slots(slots)
+        template.slots = _valid_slots(data, slots)
     return template
 
 
@@ -179,7 +311,7 @@ def paint_day_template(
     if end < start_slot:
         raise ProgramError(f"Intervallo di slot rovesciato: {start_slot}-{end}")
 
-    char = INHERIT_CHAR if level is None else _level_char(level)
+    char = INHERIT_CHAR if level is None else require_level(data, level).char
     template.slots = (
         template.slots[:start_slot]
         + char * (end - start_slot + 1)
@@ -222,7 +354,10 @@ def duplicate_day_template(
         )
 
     copy = DayTemplate(
-        id=copy_id, name=name or f"{source.name} (copia)", slots=source.slots
+        id=copy_id,
+        name=name or f"{source.name} (copia)",
+        slots=source.slots,
+        setpoints=dict(source.setpoints),
     )
     data.day_templates[copy_id] = copy
 
@@ -292,7 +427,7 @@ def set_week_template(
 
 
 def delete_week_template(data: CthaData, template_id: str) -> WeekTemplate:
-    """Elimina una settimana tipo, se nessuno scenario o zona la segue."""
+    """Elimina una settimana tipo, se nessuno scenario la assegna a una zona."""
     require_week_template(data, template_id)
     if usages := week_template_usages(data, template_id):
         raise ReferenceInUseError(
@@ -309,43 +444,38 @@ def set_scenario(
     data: CthaData,
     scenario_id: str,
     name: str | None = None,
-    week_template: str | None = None,
-    offset: float | None = None,
-    zone_offsets: dict[str, float | None] | None = None,
+    zones: dict[str, str | None] | None = None,
 ) -> Scenario:
-    """Crea o aggiorna uno scenario; gli offset di zona si fondono.
+    """Crea o aggiorna uno scenario; le assegnazioni di zona si fondono.
 
-    Un valore `None` in `zone_offsets` rimuove l'eccezione e riporta la zona
-    all'offset generale dello scenario.
+    Uno scenario nuovo parte dalla configurazione di quello attivo: chi ne crea
+    uno vuole quasi sempre variarne uno esistente, e partire da tutte le zone
+    scoperte vorrebbe dire un impianto fermo appena lo si attiva. Un valore
+    `None` in `zones` toglie la zona dallo scenario, che è il modo di dire "qui
+    questa zona non è programmata".
     """
-    for zone_id in zone_offsets or {}:
-        require_zone(data, zone_id)
+    assignments = {
+        require_zone(data, zone_id).id: _checked_week_template(data, week_id)
+        for zone_id, week_id in (zones or {}).items()
+    }
 
     scenario = data.scenarios.get(scenario_id)
     if scenario is None:
-        week_id = week_template or _default_week_template(data)
-        require_week_template(data, week_id)
+        active = data.active()
         scenario = Scenario(
             id=scenario_id,
             name=name or scenario_id,
-            week_template=week_id,
-            offset=offset or 0.0,
+            zones=dict(active.zones) if active else {},
         )
         data.scenarios[scenario_id] = scenario
-    else:
-        if name is not None:
-            scenario.name = name
-        if week_template is not None:
-            require_week_template(data, week_template)
-            scenario.week_template = week_template
-        if offset is not None:
-            scenario.offset = offset
+    elif name is not None:
+        scenario.name = name
 
-    for zone_id, zone_offset in (zone_offsets or {}).items():
-        if zone_offset is None:
-            scenario.zone_offsets.pop(zone_id, None)
+    for zone_id, week_id in assignments.items():
+        if week_id is None:
+            scenario.zones.pop(zone_id, None)
         else:
-            scenario.zone_offsets[zone_id] = zone_offset
+            scenario.zones[zone_id] = week_id
 
     return scenario
 
@@ -369,53 +499,82 @@ def set_active_scenario(data: CthaData, scenario_id: str) -> Scenario:
     return scenario
 
 
-# --- Setpoint e zone --------------------------------------------------------
-
-
-def set_setpoint(
-    data: CthaData,
-    level: str,
-    temperature: float | None,
-    zone_id: str | None = None,
-) -> float | None:
-    """Imposta un setpoint globale o di zona per un livello.
-
-    Senza `zone_id` si tocca la radice dell'ereditarietà, e lì `None` non ha
-    significato: un livello globale senza temperatura lascerebbe le zone che lo
-    ereditano senza alcun valore. Su una zona, invece, `None` è proprio il modo
-    di dire "torna a ereditare".
-    """
-    _valid_level(level)
-
-    if zone_id is None:
-        if temperature is None:
-            raise ProgramError(
-                f"Il setpoint globale di '{level}' non può ereditare da nessuno"
-            )
-        data.global_setpoints[level] = _valid_temperature(temperature)
-        return data.global_setpoints[level]
-
-    zone = require_zone(data, zone_id)
-    if temperature is None:
-        zone.setpoints.pop(level, None)
-        return None
-
-    zone.setpoints[level] = _valid_temperature(temperature)
-    return zone.setpoints[level]
-
-
 def set_zone_week_template(
-    data: CthaData, zone_id: str, template_id: str | None
-) -> Zone:
-    """Assegna a una zona un programma proprio, o la riporta a quello di scenario."""
-    zone = require_zone(data, zone_id)
-    if template_id is not None:
+    data: CthaData,
+    zone_id: str,
+    template_id: str | None,
+    scenario_id: str | None = None,
+) -> Scenario:
+    """Assegna a una zona la sua settimana tipo dentro uno scenario.
+
+    Senza `scenario_id` si lavora sullo scenario attivo: è il gesto quotidiano,
+    e chiedere ogni volta di ripetere quale scenario sia in corso sarebbe solo
+    un modo di sbagliarlo.
+    """
+    require_zone(data, zone_id)
+    scenario = (
+        require_scenario(data, scenario_id)
+        if scenario_id is not None
+        else _require_active(data)
+    )
+
+    if template_id is None:
+        scenario.zones.pop(zone_id, None)
+    else:
         require_week_template(data, template_id)
-    zone.week_template = template_id
-    return zone
+        scenario.zones[zone_id] = template_id
+    return scenario
+
+
+# --- Zone -------------------------------------------------------------------
+
+
+def ensure_zone(data: CthaData, zone_id: str, name: str) -> bool:
+    """Registra la zona e le dà un programma in ogni scenario; dice se ha cambiato.
+
+    Una zona appena aggiunta non è citata da nessuno scenario, e uno scenario
+    che non la cita non la programma: senza questa assegnazione iniziale la
+    zona resterebbe muta finché qualcuno non apre il pannello. Si sceglie la
+    settimana tipo già più diffusa nello scenario, che è quasi sempre quella
+    giusta e comunque la più facile da correggere.
+    """
+    changed = False
+    if (zone := data.zones.get(zone_id)) is None:
+        data.zones[zone_id] = Zone(id=zone_id, name=name)
+        changed = True
+    elif zone.name != name:
+        zone.name = name
+        changed = True
+
+    for scenario in data.scenarios.values():
+        if zone_id in scenario.zones:
+            continue
+        if (week_id := _prevailing_week_template(data, scenario)) is not None:
+            scenario.zones[zone_id] = week_id
+            changed = True
+
+    return changed
+
+
+def remove_zone(data: CthaData, zone_id: str) -> None:
+    """Toglie ogni traccia di una zona: registro, override, assegnazioni."""
+    data.zones.pop(zone_id, None)
+    data.overrides.pop(zone_id, None)
+    for scenario in data.scenarios.values():
+        scenario.zones.pop(zone_id, None)
 
 
 # --- Helper -----------------------------------------------------------------
+
+
+def require_level(data: CthaData, level_id: str) -> TemperatureLevel:
+    """Livello esistente, o errore che nomina il riferimento rotto."""
+    if (level := data.levels.get(level_id)) is None:
+        known = ", ".join(data.levels) or "nessuno"
+        raise UnknownReferenceError(
+            f"Livello di temperatura sconosciuto: '{level_id}' (esistenti: {known})"
+        )
+    return level
 
 
 def require_day_template(data: CthaData, template_id: str) -> DayTemplate:
@@ -446,6 +605,15 @@ def require_zone(data: CthaData, zone_id: str) -> Zone:
     return zone
 
 
+def _require_active(data: CthaData) -> Scenario:
+    """Scenario attivo, o errore: senza di esso non c'è programma da toccare."""
+    if (scenario := data.active()) is None:
+        raise UnknownReferenceError(
+            f"Lo scenario attivo '{data.active_scenario}' non esiste"
+        )
+    return scenario
+
+
 def _checked_day_template(data: CthaData, template_id: str | None) -> str | None:
     """Id di giornata tipo esistente, o `None` per lasciare il giorno scoperto."""
     if template_id is None:
@@ -453,40 +621,125 @@ def _checked_day_template(data: CthaData, template_id: str | None) -> str | None
     return require_day_template(data, template_id).id
 
 
-def _default_week_template(data: CthaData) -> str:
-    """Settimana su cui appoggiare un nuovo scenario quando non è specificata."""
-    active = data.active()
-    if active is not None:
-        return active.week_template
-    if data.week_templates:
-        return next(iter(data.week_templates))
-    raise UnknownReferenceError("Non esiste nessuna settimana tipo da assegnare")
+def _checked_week_template(data: CthaData, template_id: str | None) -> str | None:
+    """Id di settimana tipo esistente, o `None` per lasciare la zona scoperta."""
+    if template_id is None:
+        return None
+    return require_week_template(data, template_id).id
 
 
-def _level_char(level: str) -> str:
-    """Carattere del day template corrispondente al livello."""
-    return CHAR_BY_LEVEL[_valid_level(level)]
+def _setpoint_table(
+    data: CthaData,
+    scenario_id: str | None,
+    zone_id: str | None,
+    week_template: str | None,
+    day_template: str | None,
+) -> tuple[str, dict[str, float]]:
+    """Livello della gerarchia indicato dagli ambiti, e la sua tabella.
 
+    Gli ambiti si escludono: una temperatura sta in un punto solo della
+    gerarchia, e accettarne due significherebbe scriverne una e ignorare
+    l'altra senza dirlo.
+    """
+    scopes = [
+        (LAYER_SCENARIO, scenario_id),
+        (LAYER_ZONE, zone_id),
+        (LAYER_WEEK_TEMPLATE, week_template),
+        (LAYER_DAY_TEMPLATE, day_template),
+    ]
+    given = [(layer, value) for layer, value in scopes if value is not None]
 
-def _valid_level(level: str) -> str:
-    """Livello noto, o errore: i livelli sono un insieme chiuso."""
-    if level not in LEVELS:
+    if not given:
+        return LAYER_GLOBAL, data.global_setpoints
+    if len(given) > 1:
         raise ProgramError(
-            f"Livello sconosciuto: '{level}' (attesi: {', '.join(LEVELS)})"
+            "Un setpoint appartiene a un solo livello della gerarchia: indicati "
+            + ", ".join(layer for layer, _ in given)
         )
-    return level
+
+    layer, target = given[0]
+    if layer == LAYER_SCENARIO:
+        return layer, require_scenario(data, target).setpoints
+    if layer == LAYER_ZONE:
+        return layer, require_zone(data, target).setpoints
+    if layer == LAYER_WEEK_TEMPLATE:
+        return layer, require_week_template(data, target).setpoints
+    return layer, require_day_template(data, target).setpoints
 
 
-def _valid_slots(slots: str) -> str:
-    """Stringa di slot valida, con l'errore del modello riportato come ProgramError.
+def _all_setpoint_tables(data: CthaData) -> list[dict[str, float]]:
+    """Ogni tabella di setpoint del modello, per le pulizie a valle."""
+    return [
+        data.global_setpoints,
+        *(scenario.setpoints for scenario in data.scenarios.values()),
+        *(zone.setpoints for zone in data.zones.values()),
+        *(week.setpoints for week in data.week_templates.values()),
+        *(day.setpoints for day in data.day_templates.values()),
+    ]
+
+
+def _reserve_char(data: CthaData, requested: str | None, level_id: str) -> str:
+    """Carattere libero per il nuovo livello: quello chiesto, o uno derivato dall'id."""
+    taken = {level.char for level in data.levels.values()}
+
+    if requested is not None:
+        if len(requested) != 1 or requested not in LEVEL_CHARS:
+            raise ProgramError(
+                f"Il carattere di un livello è uno solo, fra '{LEVEL_CHARS}': "
+                f"ricevuto '{requested}'"
+            )
+        if requested in taken:
+            raise ProgramError(f"Il carattere '{requested}' è già di un altro livello")
+        return requested
+
+    # Prima le lettere dell'identificatore, così il day template resta leggibile
+    # anche a occhio nudo; poi il resto dell'alfabeto.
+    for char in (*level_id.lower(), *LEVEL_CHARS):
+        if char in LEVEL_CHARS and char not in taken:
+            return char
+    raise ProgramError(f"Finiti i caratteri disponibili: {len(taken)} livelli esistenti")
+
+
+def _default_slots(data: CthaData) -> str:
+    """Slot di partenza per una giornata tipo nuova.
+
+    La giornata di default cita i quattro livelli iniziali: se l'utente li ha
+    eliminati o ne ha cambiato i caratteri, quella stringa non vuole più dire
+    niente, e una giornata tutta ereditata è l'unica partenza sempre valida.
+    """
+    known = {level.char for level in data.levels.values()} | {INHERIT_CHAR}
+    if set(DEFAULT_DAY_SLOTS) <= known:
+        return DEFAULT_DAY_SLOTS
+    return INHERIT_CHAR * SLOTS_PER_DAY
+
+
+def _prevailing_week_template(data: CthaData, scenario: Scenario) -> str | None:
+    """Settimana tipo più diffusa nello scenario, o la prima che esiste."""
+    if scenario.zones:
+        counts: dict[str, int] = {}
+        for week_id in scenario.zones.values():
+            counts[week_id] = counts.get(week_id, 0) + 1
+        return max(counts, key=lambda week_id: counts[week_id])
+    return next(iter(data.week_templates), None)
+
+
+def _valid_slots(data: CthaData, slots: str) -> str:
+    """Stringa di slot valida per forma e per riferimenti.
 
     Chi chiama queste funzioni deve poter intercettare una sola famiglia di
     errori per dire all'utente "così non si può".
     """
     try:
-        return validate_slots(slots)
+        validate_slots(slots)
     except InvalidTemplateError as err:
         raise ProgramError(str(err)) from err
+
+    known = {level.char for level in data.levels.values()} | {INHERIT_CHAR}
+    if unknown := sorted(set(slots) - known):
+        raise UnknownReferenceError(
+            f"Gli slot citano livelli che non esistono: {', '.join(unknown)}"
+        )
+    return slots
 
 
 def _valid_temperature(temperature: float) -> float:

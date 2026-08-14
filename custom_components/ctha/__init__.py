@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .coordinator import CthaCoordinator, async_get_coordinator
+from .program import remove_zone
 from .panel import async_register_panel, async_remove_panel
 from .services import async_register_services, async_unregister_services
 from .store import async_get_store
@@ -67,6 +68,5 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     if not hass.data.get(DOMAIN, {}).get("initialized"):
         await store.async_load()
 
-    store.data.zones.pop(entry.entry_id, None)
-    store.data.overrides.pop(entry.entry_id, None)
+    remove_zone(store.data, entry.entry_id)
     await store.async_save()

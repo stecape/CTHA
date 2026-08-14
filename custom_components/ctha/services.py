@@ -3,12 +3,15 @@
 Sono la superficie di scrittura del componente. Esistono prima del frontend
 perché senza di essi il modello si può solo leggere: creare uno scenario o
 ritoccare una giornata tipo richiederebbe già la UI. Sono anche l'API su cui la
-griglia di programmazione si appoggerà, ed è la ragione per cui `paint_slots`
+griglia di programmazione si appoggia, ed è la ragione per cui `paint_slots`
 prende un intervallo e non uno slot.
 
 Ogni servizio è un guscio sottile: valida gli argomenti, chiama la funzione
 pura di `program.py` tramite `coordinator.async_edit` e traduce gli errori del
-modello in errori mostrabili all'utente.
+modello in errori mostrabili all'utente. Quali valori siano ammessi per un
+livello di temperatura non è più decidibile qui — i livelli sono dati, non
+costanti — quindi lo schema accetta una stringa e a rifiutare l'ignoto pensa
+`program.require_level`.
 """
 
 from __future__ import annotations
@@ -32,13 +35,15 @@ from homeassistant.helpers import config_validation as cv
 
 from . import program
 from .const import (
+    ATTR_CHAR,
+    ATTR_COLOR,
+    ATTR_DAY_TEMPLATE,
     ATTR_DAYS,
     ATTR_DURATION,
     ATTR_END_SLOT,
     ATTR_LEVEL,
     ATTR_NAME,
     ATTR_NEW_ID,
-    ATTR_OFFSET,
     ATTR_POLICY,
     ATTR_SCENARIO_ID,
     ATTR_SLOTS,
@@ -46,10 +51,9 @@ from .const import (
     ATTR_TEMPLATE_ID,
     ATTR_WEEK_TEMPLATE,
     ATTR_ZONE_ID,
-    ATTR_ZONE_OFFSETS,
+    ATTR_ZONES,
     DAYS_PER_WEEK,
     DOMAIN,
-    LEVELS,
     MAX_TEMP,
     MIN_TEMP,
     OVERRIDE_POLICIES,
@@ -57,11 +61,13 @@ from .const import (
     SERVICE_ACTIVATE_SCENARIO,
     SERVICE_CLEAR_OVERRIDE,
     SERVICE_DELETE_DAY_TEMPLATE,
+    SERVICE_DELETE_LEVEL,
     SERVICE_DELETE_SCENARIO,
     SERVICE_DELETE_WEEK_TEMPLATE,
     SERVICE_DUPLICATE_DAY_TEMPLATE,
     SERVICE_PAINT_SLOTS,
     SERVICE_SET_DAY_TEMPLATE,
+    SERVICE_SET_LEVEL,
     SERVICE_SET_OVERRIDE,
     SERVICE_SET_SCENARIO,
     SERVICE_SET_SETPOINT,
@@ -86,6 +92,32 @@ SET_OVERRIDE_SCHEMA = vol.Schema(
 
 CLEAR_OVERRIDE_SCHEMA = vol.Schema({vol.Required(ATTR_ZONE_ID): cv.string})
 
+SET_LEVEL_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_LEVEL): cv.string,
+        vol.Optional(ATTR_NAME): cv.string,
+        vol.Optional(ATTR_COLOR): cv.string,
+        # Solo alla creazione: il carattere finisce dentro i day template.
+        vol.Optional(ATTR_CHAR): vol.All(cv.string, vol.Length(min=1, max=1)),
+        vol.Optional(ATTR_TEMPERATURE): _TEMPERATURE,
+    }
+)
+
+DELETE_LEVEL_SCHEMA = vol.Schema({vol.Required(ATTR_LEVEL): cv.string})
+
+SET_SETPOINT_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_LEVEL): cv.string,
+        # Assente o nullo: quel punto della gerarchia torna a ereditare.
+        vol.Optional(ATTR_TEMPERATURE): vol.Any(None, _TEMPERATURE),
+        # Ambiti alternativi; senza nessuno si scrive il setpoint globale.
+        vol.Optional(ATTR_SCENARIO_ID): cv.string,
+        vol.Optional(ATTR_ZONE_ID): cv.string,
+        vol.Optional(ATTR_WEEK_TEMPLATE): cv.string,
+        vol.Optional(ATTR_DAY_TEMPLATE): cv.string,
+    }
+)
+
 SET_DAY_TEMPLATE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_TEMPLATE_ID): cv.string,
@@ -101,8 +133,8 @@ PAINT_SLOTS_SCHEMA = vol.Schema(
         vol.Required(ATTR_TEMPLATE_ID): cv.string,
         vol.Required(ATTR_START_SLOT): _SLOT,
         vol.Optional(ATTR_END_SLOT): _SLOT,
-        # Nessun livello significa "dipingi l'ereditarietà dal globale".
-        vol.Optional(ATTR_LEVEL): vol.Any(None, vol.In(LEVELS)),
+        # Nessun livello significa "dipingi l'ereditarietà".
+        vol.Optional(ATTR_LEVEL): vol.Any(None, cv.string),
     }
 )
 
@@ -133,12 +165,8 @@ SET_SCENARIO_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_SCENARIO_ID): cv.string,
         vol.Optional(ATTR_NAME): cv.string,
-        vol.Optional(ATTR_WEEK_TEMPLATE): cv.string,
-        vol.Optional(ATTR_OFFSET): vol.Coerce(float),
-        # Valore nullo: la zona torna all'offset generale dello scenario.
-        vol.Optional(ATTR_ZONE_OFFSETS): vol.Schema(
-            {cv.string: vol.Any(None, vol.Coerce(float))}
-        ),
+        # Valore nullo: la zona non è programmata in questo scenario.
+        vol.Optional(ATTR_ZONES): vol.Schema({cv.string: vol.Any(None, cv.string)}),
     }
 )
 
@@ -146,20 +174,13 @@ DELETE_SCENARIO_SCHEMA = vol.Schema({vol.Required(ATTR_SCENARIO_ID): cv.string})
 
 ACTIVATE_SCENARIO_SCHEMA = vol.Schema({vol.Required(ATTR_SCENARIO_ID): cv.string})
 
-SET_SETPOINT_SCHEMA = vol.Schema(
-    {
-        vol.Required(ATTR_LEVEL): vol.In(LEVELS),
-        # Assente o nullo su una zona: torna a ereditare dal globale.
-        vol.Optional(ATTR_TEMPERATURE): vol.Any(None, _TEMPERATURE),
-        vol.Optional(ATTR_ZONE_ID): cv.string,
-    }
-)
-
 SET_ZONE_WEEK_TEMPLATE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ZONE_ID): cv.string,
-        # Assente o nullo: la zona torna a seguire lo scenario.
+        # Assente o nullo: la zona esce dal programma di quello scenario.
         vol.Optional(ATTR_TEMPLATE_ID): vol.Any(None, cv.string),
+        # Assente: si lavora sullo scenario attivo.
+        vol.Optional(ATTR_SCENARIO_ID): cv.string,
     }
 )
 
@@ -184,6 +205,41 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def _async_clear_override(call: ServiceCall) -> None:
         """Rimuove l'override dalla zona indicata."""
         await _coordinator(hass).async_clear_override(call.data[ATTR_ZONE_ID])
+
+    # --- Livelli di temperatura ---------------------------------------------
+
+    async def _async_set_level(call: ServiceCall) -> None:
+        """Crea o aggiorna un livello di temperatura."""
+        await _edit(
+            hass,
+            partial(
+                program.set_level,
+                level_id=call.data[ATTR_LEVEL],
+                name=call.data.get(ATTR_NAME),
+                color=call.data.get(ATTR_COLOR),
+                char=call.data.get(ATTR_CHAR),
+                setpoint=call.data.get(ATTR_TEMPERATURE),
+            ),
+        )
+
+    async def _async_delete_level(call: ServiceCall) -> None:
+        """Elimina un livello non più dipinto in nessuna giornata tipo."""
+        await _edit(hass, partial(program.delete_level, level_id=call.data[ATTR_LEVEL]))
+
+    async def _async_set_setpoint(call: ServiceCall) -> None:
+        """Scrive la temperatura di un livello a un punto della gerarchia."""
+        await _edit(
+            hass,
+            partial(
+                program.set_setpoint,
+                level=call.data[ATTR_LEVEL],
+                temperature=call.data.get(ATTR_TEMPERATURE),
+                scenario_id=call.data.get(ATTR_SCENARIO_ID),
+                zone_id=call.data.get(ATTR_ZONE_ID),
+                week_template=call.data.get(ATTR_WEEK_TEMPLATE),
+                day_template=call.data.get(ATTR_DAY_TEMPLATE),
+            ),
+        )
 
     # --- Giornate tipo ------------------------------------------------------
 
@@ -262,16 +318,14 @@ def async_register_services(hass: HomeAssistant) -> None:
     # --- Scenari ------------------------------------------------------------
 
     async def _async_set_scenario(call: ServiceCall) -> None:
-        """Crea o aggiorna uno scenario."""
+        """Crea o aggiorna uno scenario e le settimane tipo delle sue zone."""
         await _edit(
             hass,
             partial(
                 program.set_scenario,
                 scenario_id=call.data[ATTR_SCENARIO_ID],
                 name=call.data.get(ATTR_NAME),
-                week_template=call.data.get(ATTR_WEEK_TEMPLATE),
-                offset=call.data.get(ATTR_OFFSET),
-                zone_offsets=call.data.get(ATTR_ZONE_OFFSETS),
+                zones=call.data.get(ATTR_ZONES),
             ),
         )
 
@@ -291,28 +345,15 @@ def async_register_services(hass: HomeAssistant) -> None:
         except program.ProgramError as err:
             raise ServiceValidationError(str(err)) from err
 
-    # --- Setpoint e zone ----------------------------------------------------
-
-    async def _async_set_setpoint(call: ServiceCall) -> None:
-        """Imposta un setpoint globale o di zona."""
-        await _edit(
-            hass,
-            partial(
-                program.set_setpoint,
-                level=call.data[ATTR_LEVEL],
-                temperature=call.data.get(ATTR_TEMPERATURE),
-                zone_id=call.data.get(ATTR_ZONE_ID),
-            ),
-        )
-
     async def _async_set_zone_week_template(call: ServiceCall) -> None:
-        """Dà a una zona un programma proprio, o la riporta a quello di scenario."""
+        """Assegna a una zona la sua settimana tipo dentro uno scenario."""
         await _edit(
             hass,
             partial(
                 program.set_zone_week_template,
                 zone_id=call.data[ATTR_ZONE_ID],
                 template_id=call.data.get(ATTR_TEMPLATE_ID),
+                scenario_id=call.data.get(ATTR_SCENARIO_ID),
             ),
         )
 
@@ -320,6 +361,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     _register(
         hass, SERVICE_CLEAR_OVERRIDE, _async_clear_override, CLEAR_OVERRIDE_SCHEMA
     )
+    _register(hass, SERVICE_SET_LEVEL, _async_set_level, SET_LEVEL_SCHEMA)
+    _register(hass, SERVICE_DELETE_LEVEL, _async_delete_level, DELETE_LEVEL_SCHEMA)
+    _register(hass, SERVICE_SET_SETPOINT, _async_set_setpoint, SET_SETPOINT_SCHEMA)
     _register(
         hass, SERVICE_SET_DAY_TEMPLATE, _async_set_day_template, SET_DAY_TEMPLATE_SCHEMA
     )
@@ -359,7 +403,6 @@ def async_register_services(hass: HomeAssistant) -> None:
         _async_activate_scenario,
         ACTIVATE_SCENARIO_SCHEMA,
     )
-    _register(hass, SERVICE_SET_SETPOINT, _async_set_setpoint, SET_SETPOINT_SCHEMA)
     _register(
         hass,
         SERVICE_SET_ZONE_WEEK_TEMPLATE,
@@ -374,6 +417,9 @@ def async_unregister_services(hass: HomeAssistant) -> None:
     for service in (
         SERVICE_SET_OVERRIDE,
         SERVICE_CLEAR_OVERRIDE,
+        SERVICE_SET_LEVEL,
+        SERVICE_DELETE_LEVEL,
+        SERVICE_SET_SETPOINT,
         SERVICE_SET_DAY_TEMPLATE,
         SERVICE_PAINT_SLOTS,
         SERVICE_DUPLICATE_DAY_TEMPLATE,
@@ -383,7 +429,6 @@ def async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_SET_SCENARIO,
         SERVICE_DELETE_SCENARIO,
         SERVICE_ACTIVATE_SCENARIO,
-        SERVICE_SET_SETPOINT,
         SERVICE_SET_ZONE_WEEK_TEMPLATE,
     ):
         hass.services.async_remove(DOMAIN, service)

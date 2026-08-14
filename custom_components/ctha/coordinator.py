@@ -32,9 +32,9 @@ from .const import (
     SLOT_MINUTES,
     WRITE_STAGGER_SECONDS,
 )
-from .models import CthaData, Override, Zone
+from .models import CthaData, Override
 from .override import OverrideManager
-from .resolve import Resolution, resolve_setpoint
+from .resolve import Chain, Resolution, resolve_chain, resolve_setpoint
 from .store import CthaStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -91,16 +91,11 @@ class CthaCoordinator(DataUpdateCoordinator[CthaData]):
 
     # --- Registrazione delle zone -------------------------------------------
 
-    def register_zone(self, zone_id: str, name: str) -> Zone:
-        """Assicura che la zona esista nel modello e la restituisce."""
-        if (zone := self.data.zones.get(zone_id)) is None:
-            zone = Zone(id=zone_id, name=name)
-            self.data.zones[zone_id] = zone
+    def register_zone(self, zone_id: str, name: str) -> None:
+        """Assicura che la zona esista e sia programmata in ogni scenario."""
+        if program.ensure_zone(self.data, zone_id, name):
             self._store.async_schedule_save()
-        elif zone.name != name:
-            zone.name = name
-            self._store.async_schedule_save()
-        return zone
+            self.async_update_listeners()
 
     @callback
     def register_writer(self, zone_id: str, writer: ZoneWriter) -> Callable[[], None]:
@@ -134,6 +129,14 @@ class CthaCoordinator(DataUpdateCoordinator[CthaData]):
     def resolution_for(self, zone_id: str, now: datetime | None = None) -> Resolution:
         """Risoluzione da programma per la zona, senza considerare gli override."""
         return resolve_setpoint(self.data, zone_id, now or dt_util.now())
+
+    def chain_for(self, zone_id: str, now: datetime | None = None) -> Chain:
+        """Percorso che la zona sta seguendo: scenario, settimana, giornata.
+
+        Il pannello ha bisogno di nominarlo — «segue Invernale, oggi Feriale» —
+        e la catena è già calcolata durante la risoluzione.
+        """
+        return resolve_chain(self.data, zone_id, now or dt_util.now())
 
     def target_for(self, zone_id: str, now: datetime | None = None) -> float | None:
         """Setpoint effettivo: l'override attivo se c'è, altrimenti il programma."""

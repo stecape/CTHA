@@ -2,9 +2,22 @@
 // `websocket.py`. Le chiavi dei dizionari passano da JSON, quindi i giorni
 // della settimana arrivano come stringhe ("0"…"6") anche se nel modello Python
 // sono interi.
+//
+// I livelli di temperatura non sono più un'unione chiusa: si creano e si
+// eliminano dal pannello, quindi qui sono id opachi e il loro elenco arriva
+// col programma.
 
-export type Level = "comfort" | "eco" | "antifreeze";
-export type SetpointSource = "zone" | "global" | "none";
+export type LevelId = string;
+
+/** I cinque punti della gerarchia dei setpoint, più «nessuno». */
+export type Layer =
+  | "day_template"
+  | "week_template"
+  | "zone"
+  | "scenario"
+  | "global"
+  | "none";
+
 export type OverrideSource = "ha" | "external" | "hardware";
 export type Policy =
   | "next_slot"
@@ -12,11 +25,29 @@ export type Policy =
   | "until_scenario_change"
   | "sticky";
 
+/** Livello → °C. Un livello assente eredita da chi sta sopra. */
+export type Setpoints = Record<LevelId, number>;
+
+/** Un punto della gerarchia: il livello e, se non è il globale, quale elemento. */
+export interface Scope {
+  layer: Layer;
+  id: string;
+}
+
+export interface TemperatureLevel {
+  id: LevelId;
+  name: string;
+  /** Carattere che rappresenta il livello dentro i day template. */
+  char: string;
+  color: string;
+}
+
 export interface DayTemplate {
   id: string;
   name: string;
-  /** 48 caratteri: c, e, a, oppure "-" per ereditare. */
+  /** 48 caratteri: quello di un livello, oppure "-" per ereditare. */
   slots: string;
+  setpoints: Setpoints;
 }
 
 export interface WeekTemplate {
@@ -24,22 +55,21 @@ export interface WeekTemplate {
   name: string;
   /** giorno ("0" = lunedì) → id della giornata tipo. */
   days: Record<string, string>;
+  setpoints: Setpoints;
 }
 
 export interface Scenario {
   id: string;
   name: string;
-  week_template: string;
-  offset: number;
-  zone_offsets: Record<string, number>;
+  /** zona → settimana tipo che segue in questo scenario. */
+  zones: Record<string, string>;
+  setpoints: Setpoints;
 }
 
 export interface Zone {
   id: string;
   name: string;
-  /** livello → temperatura; assente o null significa "eredita". */
-  setpoints: Partial<Record<Level, number | null>>;
-  week_template: string | null;
+  setpoints: Setpoints;
 }
 
 export interface Override {
@@ -53,7 +83,8 @@ export interface Override {
 }
 
 export interface Program {
-  global_setpoints: Record<Level, number>;
+  levels: Record<LevelId, TemperatureLevel>;
+  global_setpoints: Setpoints;
   day_templates: Record<string, DayTemplate>;
   week_templates: Record<string, WeekTemplate>;
   scenarios: Record<string, Scenario>;
@@ -65,20 +96,23 @@ export interface Program {
 /** Risoluzione corrente di una zona: non è deducibile dal solo modello. */
 export interface ZoneRuntime {
   entity_id: string | null;
-  level: Level | null;
-  base: number | null;
-  source: SetpointSource;
-  offset: number;
+  level: LevelId | null;
+  source: Layer;
   scheduled: number | null;
   target: number | null;
+  week_template: string | null;
+  day_template: string | null;
+  slot: number;
   override: Override | null;
 }
 
 export interface Meta {
-  levels: Level[];
+  /** Gerarchia dal più specifico al più generale, come in `resolve.py`. */
+  layers: Layer[];
   policies: Policy[];
   slots_per_day: number;
   slot_minutes: number;
+  inherit_char: string;
   min_temp: number;
   max_temp: number;
   temp_step: number;

@@ -47,6 +47,72 @@
         }
       }
     },
+    "set_level": {
+      "name": "Imposta livello di temperatura",
+      "description": "Crea un livello di temperatura o ne aggiorna nome, colore e setpoint globale. I livelli sono liberi: alta, media, bassa e antigelo sono solo quelli iniziali.",
+      "fields": {
+        "level": {
+          "name": "Livello",
+          "description": "Id del livello: se non esiste viene creato."
+        },
+        "name": {
+          "name": "Nome",
+          "description": "Nome mostrato nell'interfaccia."
+        },
+        "color": {
+          "name": "Colore",
+          "description": "Colore con cui il livello compare nella griglia, in formato CSS."
+        },
+        "char": {
+          "name": "Carattere",
+          "description": "Carattere che rappresenta il livello dentro le giornate tipo. Si può indicare solo alla creazione: cambiarlo dopo vorrebbe dire riscrivere ogni giornata che lo usa."
+        },
+        "temperature": {
+          "name": "Setpoint globale",
+          "description": "Temperatura del livello alla radice della gerarchia. Alla creazione, se omessa, il livello parte da 20 °C."
+        }
+      }
+    },
+    "delete_level": {
+      "name": "Elimina livello di temperatura",
+      "description": "Elimina un livello e ogni setpoint che lo riguarda. L'operazione fallisce se il livello è ancora dipinto in una giornata tipo.",
+      "fields": {
+        "level": {
+          "name": "Livello",
+          "description": "Id del livello da eliminare."
+        }
+      }
+    },
+    "set_setpoint": {
+      "name": "Imposta setpoint",
+      "description": "Scrive la temperatura di un livello in un punto della gerarchia: globale, scenario, zona, settimana tipo o giornata tipo. Chi sta più in basso sovrascrive, chi non dice nulla eredita.",
+      "fields": {
+        "level": {
+          "name": "Livello",
+          "description": "Livello di temperatura da impostare."
+        },
+        "temperature": {
+          "name": "Temperatura",
+          "description": "Temperatura del livello. Lasciandola vuota quel punto della gerarchia torna a ereditare; il setpoint globale non può essere vuoto."
+        },
+        "scenario_id": {
+          "name": "Scenario",
+          "description": "Scrive il setpoint sullo scenario indicato."
+        },
+        "zone_id": {
+          "name": "Zona",
+          "description": "Scrive il setpoint sulla zona indicata."
+        },
+        "week_template": {
+          "name": "Settimana tipo",
+          "description": "Scrive il setpoint sulla settimana tipo indicata."
+        },
+        "day_template": {
+          "name": "Giornata tipo",
+          "description": "Scrive il setpoint sulla giornata tipo indicata."
+        }
+      }
+    },
     "set_day_template": {
       "name": "Imposta giornata tipo",
       "description": "Crea una giornata tipo o ne aggiorna nome e slot. I campi omessi restano invariati.",
@@ -61,7 +127,7 @@
         },
         "slots": {
           "name": "Slot",
-          "description": "48 caratteri, uno ogni 30 minuti dalla mezzanotte: c = comfort, e = eco, a = antigelo, - = eredita dal globale."
+          "description": "48 caratteri, uno ogni 30 minuti dalla mezzanotte. Ogni livello di temperatura ha il suo carattere; \"-\" eredita, cioè non impone nulla."
         }
       }
     },
@@ -83,7 +149,7 @@
         },
         "level": {
           "name": "Livello",
-          "description": "Livello da assegnare. Se omesso gli slot tornano a ereditare dal globale."
+          "description": "Livello da assegnare. Se omesso gli slot tornano a ereditare."
         }
       }
     },
@@ -143,7 +209,7 @@
     },
     "delete_week_template": {
       "name": "Elimina settimana tipo",
-      "description": "Elimina una settimana tipo. L'operazione fallisce se uno scenario o una zona la stanno ancora seguendo.",
+      "description": "Elimina una settimana tipo. L'operazione fallisce se uno scenario la sta ancora assegnando a una zona.",
       "fields": {
         "template_id": {
           "name": "Settimana tipo",
@@ -153,7 +219,7 @@
     },
     "set_scenario": {
       "name": "Imposta scenario",
-      "description": "Crea uno scenario o ne aggiorna nome, settimana tipo e offset termici.",
+      "description": "Crea uno scenario o ne aggiorna nome e configurazione delle zone. Uno scenario è la mappa zona → settimana tipo; quello nuovo parte dalla configurazione dello scenario attivo.",
       "fields": {
         "scenario_id": {
           "name": "Identificatore",
@@ -163,17 +229,9 @@
           "name": "Nome",
           "description": "Nome mostrato nell'interfaccia."
         },
-        "week_template": {
-          "name": "Settimana tipo",
-          "description": "Settimana tipo seguita dallo scenario."
-        },
-        "offset": {
-          "name": "Offset",
-          "description": "Scostamento applicato a tutte le temperature dello scenario."
-        },
-        "zone_offsets": {
-          "name": "Offset per zona",
-          "description": "Mappa zona → offset, per le zone che fanno eccezione. Un valore vuoto rimuove l'eccezione."
+        "zones": {
+          "name": "Zone",
+          "description": "Mappa zona → settimana tipo. Un valore vuoto toglie la zona dallo scenario, che in quello scenario resta senza programma."
         }
       }
     },
@@ -197,27 +255,9 @@
         }
       }
     },
-    "set_setpoint": {
-      "name": "Imposta setpoint",
-      "description": "Imposta la temperatura di un livello, globalmente o per una singola zona.",
-      "fields": {
-        "level": {
-          "name": "Livello",
-          "description": "Livello da impostare: comfort, eco o antigelo."
-        },
-        "temperature": {
-          "name": "Temperatura",
-          "description": "Temperatura del livello. Lasciandola vuota la zona torna a ereditare dal setpoint globale; il setpoint globale non può essere vuoto."
-        },
-        "zone_id": {
-          "name": "Zona",
-          "description": "Zona da modificare. Se omessa si modifica il setpoint globale."
-        }
-      }
-    },
     "set_zone_week_template": {
       "name": "Programma di zona",
-      "description": "Dà a una zona una settimana tipo tutta sua, o la riporta a seguire quella dello scenario.",
+      "description": "Assegna a una zona la settimana tipo che segue dentro uno scenario.",
       "fields": {
         "zone_id": {
           "name": "Zona",
@@ -225,7 +265,11 @@
         },
         "template_id": {
           "name": "Settimana tipo",
-          "description": "Settimana tipo da assegnare alla zona. Se omessa la zona torna a seguire lo scenario."
+          "description": "Settimana tipo da assegnare. Se omessa la zona esce dal programma di quello scenario."
+        },
+        "scenario_id": {
+          "name": "Scenario",
+          "description": "Scenario in cui vale l'assegnazione. Se omesso si lavora sullo scenario attivo."
         }
       }
     }

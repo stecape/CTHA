@@ -17,6 +17,14 @@ multi-scenario, livelli di temperatura ereditati, template riutilizzabili e
 gestione elegante degli override a livello hardware provenienti dai
 termostati fisici e dall'unità centrale.
 
+**L'architettura in una frase.** Si parte dalle giornate tipo (30 minuti di
+granularità), da quelle si costruiscono le settimane tipo, e uno scenario è la
+configurazione delle zone: a ogni zona la sua settimana tipo. L'esercizio si
+riduce a scegliere lo scenario attivo. Le temperature sono un insieme aperto e
+si sovrascrivono lungo la gerarchia
+`Global → Scenario → Zona → Week template → Day template`, ereditando dal
+superiore quando non dicono nulla.
+
 **Nota sullo stato del codice**: l'architettura target è implementata in
 `custom_components/ctha/` (modello dati a riferimenti, risoluzione su due assi,
 override con soppressione echo, persistenza su Store, watchdog di
@@ -41,14 +49,15 @@ custom_components/ctha/
 ├── __init__.py        # setup/unload delle entry, avvio del runtime condiviso
 ├── climate.py         # CthaThermostat: entità di zona, scrittura del setpoint
 ├── config_flow.py     # CthaConfigFlow: nome della zona e termostato da pilotare
-├── const.py           # DOMAIN, chiavi di config, livelli, timing, default
+├── const.py           # DOMAIN, chiavi di config, gerarchia, timing, default
 ├── coordinator.py     # CthaCoordinator: programma, override, watchdog
+├── migrate.py         # migrazione dei dati fra versioni dello Store
 ├── models.py          # dataclass del modello dati, serializzabili nello Store
 ├── override.py        # OverrideManager: policy di scadenza e soppressione echo
 ├── panel.py           # percorso statico del bundle + voce in sidebar
-├── program.py         # funzioni pure di modifica: template, scenari, setpoint
-├── resolve.py         # funzioni pure: slot, livelli, resolve_setpoint
-├── services.py        # registrazione dei 13 servizi del dominio
+├── program.py         # funzioni pure di modifica: livelli, template, scenari
+├── resolve.py         # funzioni pure: catena, livelli, resolve_setpoint
+├── services.py        # registrazione dei 15 servizi del dominio
 ├── store.py           # CthaStore: persistenza via Store helper
 ├── websocket.py       # ctha/get e ctha/subscribe: lettura con push
 ├── frontend/          # bundle compilato del pannello — versionato, non a mano
@@ -64,10 +73,10 @@ hacs.json                # metadati per la distribuzione via HACS
 README.md                # documentazione utente (installazione, config, roadmap)
 ```
 
-`const.py`, `models.py`, `resolve.py`, `override.py` e `program.py` non
-importano `homeassistant`: sono logica pura, testabile senza far girare HA.
-Tenerli così è deliberato — è la parte del componente verificabile a costo
-zero, e infatti è l'unica coperta da test.
+`const.py`, `models.py`, `resolve.py`, `override.py`, `program.py` e
+`migrate.py` non importano `homeassistant`: sono logica pura, testabile senza
+far girare HA. Tenerli così è deliberato — è la parte del componente
+verificabile a costo zero, e infatti è l'unica coperta da test.
 
 Non esiste ancora una config di sviluppo Home Assistant nel repo, né test sulla
 parte che tocca HA (vedi Roadmap: `pytest-homeassistant-custom-component` è
@@ -85,15 +94,34 @@ unico bus.
   e `target_entity_id` (una entità del dominio `climate`). Una sola zona per
   termostato (`_async_abort_entries_match`). L'id della zona è l'`entry_id`.
   Non c'è options flow: non è rimasto nulla da regolare a caldo.
-- **`models.py`**: `CthaData` è la radice persistita — setpoint globali,
-  `DayTemplate`, `WeekTemplate`, `Scenario`, `Zone`, `Override`, scenario
-  attivo. Ogni dataclass ha `to_dict`/`from_dict`; `DayTemplate` valida in
-  `__post_init__` che gli slot siano 48 caratteri noti, così un template
-  malformato non arriva mai allo Store.
-- **`resolve.py`**: `resolve_level` percorre l'asse temporale,
-  `resolve_temperature` quello termico, `resolve_setpoint` li combina.
-  Restituiscono una `Resolution` che porta con sé la provenienza (`zone` o
-  `global`), perché la UI deve poter mostrare *da dove* viene un valore.
+- **`models.py`**: `CthaData` è la radice persistita — `TemperatureLevel`,
+  setpoint globali, `DayTemplate`, `WeekTemplate`, `Scenario`, `Zone`,
+  `Override`, scenario attivo. Ogni dataclass ha `to_dict`/`from_dict`;
+  `DayTemplate` valida in `__post_init__` **solo la forma** degli slot (48
+  caratteri dell'alfabeto ammesso). Che quei caratteri corrispondano a livelli
+  esistenti è una domanda sul modello intero e la fa `program.py`: validarla nel
+  dataclass renderebbe illeggibile uno Store in cui un livello è stato
+  eliminato.
+  - **I livelli di temperatura sono dati, non costanti.** Ognuno porta un
+    `char` — il carattere con cui compare nei day template, immutabile dopo la
+    creazione perché è già scritto nei template — e un `color`, che serve al
+    pannello: senza un colore per livello non esisterebbe una classe CSS da
+    scrivere per livelli che nascono a runtime.
+  - **Uno `Scenario` è la mappa `zones: zona → settimana tipo`**, non una
+    settimana sola. È ciò che rende «scegliere lo scenario» l'unico gesto di
+    esercizio: una zona assente dalla mappa semplicemente non è programmata lì.
+- **`resolve.py`**: `resolve_chain` percorre l'asse temporale e restituisce la
+  `Chain` (scenario, zona, settimana, giornata, slot); `resolve_temperature`
+  percorre la gerarchia termica **su quella stessa catena**, dal più specifico
+  al più generale — day template → week template → zona → scenario → globale —
+  e si ferma al primo che dichiara il livello. `resolve_setpoint` li combina.
+  La `Resolution` porta con sé `source`, cioè *quale livello della gerarchia ha
+  deciso*: con cinque livelli di ereditarietà, un valore senza provenienza
+  sarebbe inspiegabile.
+  - Conseguenza da tenere presente: i template sono condivisi, quindi un
+    setpoint scritto su un day template vale per **tutte** le zone che lo usano.
+    È esattamente ciò che la gerarchia richiede, ma è il punto in cui è più
+    facile sorprendersi.
 - **`override.py`**: `OverrideManager` tiene il registro degli override,
   riconosce le eco delle nostre scritture (`note_write` / `is_echo`) e applica
   le scadenze (`is_expired`, `purge_expired`). Gli override `hardware` non
@@ -101,11 +129,26 @@ unico bus.
 - **`program.py`**: le modifiche al programma, sempre come funzioni pure sul
   modello. Fa rispettare due regole: non si cita ciò che non esiste, e non si
   elimina ciò che è ancora citato — con `Usage` che dice *chi* sta usando
-  l'elemento (la stessa informazione della futura vista delle dipendenze). Le
+  l'elemento (la stessa informazione della vista delle dipendenze). Le
   operazioni che toccano più elementi validano tutto prima di mutare qualcosa,
   perché una modifica rifiutata a metà finirebbe comunque nello Store al
   salvataggio successivo. La scappatoia "duplica e scollega" è
   `duplicate_day_template`.
+  - `set_setpoint` prende gli ambiti come argomenti alternativi e ne ammette
+    **uno solo**: una temperatura sta in un punto solo della gerarchia, e
+    accettarne due vorrebbe dire scriverne una e ignorare l'altra in silenzio.
+  - `delete_level` si oppone solo se il livello è **dipinto** da qualche parte:
+    uno slot orfano è un pezzo di programma che smette di imporre qualcosa,
+    mentre una riga di setpoint che lo cita sparisce insieme a lui.
+  - `ensure_zone` è chiamata dal coordinator a ogni avvio: registra la zona e le
+    assegna una settimana tipo **in ogni scenario**, altrimenti una zona appena
+    aggiunta resterebbe muta finché qualcuno non apre il pannello.
+- **`migrate.py`**: da dizionario a dizionario, per lo Store. La v1 aveva tre
+  livelli fissi e uno scenario con una sola settimana tipo; la migrazione
+  ricrea quei tre livelli come dati (stessi caratteri, così i template già
+  dipinti restano validi) e riscrive lo scenario come mappa delle zone. Gli
+  offset non hanno più un posto: quello generale diventa una tabella di
+  temperature esplicite dello scenario, le eccezioni per zona si perdono.
 - **`coordinator.py`**: `CthaCoordinator` espone `target_for` (override se
   presente, altrimenti programma) e applica i setpoint tramite writer
   registrati dalle entità. Due timer: uno a ogni confine di slot (00 e 30),
@@ -139,7 +182,10 @@ unico bus.
   - `async_set_hvac_mode` inoltra al termostato; riaccendendo si preferisce
     `heat` ad `auto`, perché su BTicino `auto` significa "segui il programma
     della centrale", cioè proprio ciò che CTHA sta sostituendo.
-  - I preset corrispondono ai livelli: `comfort`, `eco`, `antifreeze`.
+  - I preset **sono** i livelli di temperatura, quindi `preset_modes` è una
+    property e non una costante di classe: l'elenco cambia quando l'utente crea
+    o elimina un livello. Forzare un preset risolve i gradi lungo la catena
+    corrente della zona (`resolve_level_temperature`), non sul globale.
 
 Tutte le costanti condivise (chiavi di config, livelli, timing, default,
 limiti setpoint) vivono in `const.py`: aggiungere nuove chiavi lì, non come
@@ -167,9 +213,18 @@ Il frontend è React dentro un Web Component su shadow root (`frontend/src/`):
   cambio di stato della casa, quindi la sottoscrizione websocket passa da una
   ref e si apre una volta sola (`App.tsx`).
 - `model.ts` sono funzioni pure che rifanno in TypeScript pezzi di
-  `program.py` — usanze di un template, esito di una pennellata. La
-  duplicazione è voluta: serve a mostrare l'effetto *prima* del giro sul
-  backend. La verità resta il backend, che rifiuta ciò che non è ammissibile.
+  `program.py` — usanze di un template, esito di una pennellata, catena di
+  ereditarietà. La duplicazione è voluta: serve a mostrare l'effetto *prima*
+  del giro sul backend. La verità resta il backend, che rifiuta ciò che non è
+  ammissibile.
+  - `ancestors()` mostra la catena **tipica**, non quella vera: un week template
+    non ha un solo genitore, dipende da quale zona lo segue e in quale scenario.
+    Si prende lo scenario attivo e la prima zona che ci passa, perché è la
+    situazione che l'utente sta guardando mentre programma. La risoluzione vera
+    resta quella del backend, che il pannello rilegge dal `runtime`.
+- I colori dei livelli arrivano **inline dal modello**, non dal CSS: livelli che
+  nascono a runtime non possono avere una classe scritta a mano nel foglio di
+  stile.
 - `WeekGrid.tsx` ascolta il puntatore sulla riga, non sulle celle: la posizione
   diventa un indice di slot con un calcolo sulla larghezza, così un
   trascinamento resta *un* intervallo — la forma che `paint_slots` si aspetta.
@@ -258,13 +313,18 @@ progressive. Stato attuale di ciascun pezzo:
   posto di Lit data la complessità dell'interfaccia di programmazione.
 - **Modello dei dati** — *fatto* (`models.py`): basato su riferimenti, con
   stringhe di 48 caratteri (granularità di 30 minuti) per ogni day template.
-  I valori `null` rappresentano esplicitamente l'ereditarietà dai setpoint
-  globali. Lo storage usa lo Store helper di HA (`store.py`) anziché le
-  opzioni della config entry.
+  L'assenza di un livello da una tabella di setpoint rappresenta esplicitamente
+  l'ereditarietà da chi sta sopra. Lo storage usa lo Store helper di HA
+  (`store.py`) anziché le opzioni della config entry; è alla versione 2, con
+  migrazione dalla 1 in `migrate.py`.
 - **Risoluzione termica/temporale** — *fatto* (`resolve.py`): l'asse temporale
-  (scenario → week_template → day_template → slot → level) è indipendente
-  dall'asse termico (setpoint di zona → offset di scenario → setpoint
-  globale), risolti tramite la funzione pura `resolve_setpoint`.
+  (scenario attivo → settimana tipo della zona → giornata tipo → slot → livello)
+  è indipendente dall'asse termico, che è la gerarchia
+  `global → scenario → zona → week template → day template` percorsa dal basso.
+  Entrambi passano dalla stessa `Chain`, risolta da `resolve_setpoint`.
+- **Livelli di temperatura definibili dall'utente** — *fatto*: si creano,
+  rinominano, ricolorano ed eliminano come i template. Alta, media, bassa e
+  antigelo esistono solo come contenuto di `CthaData.default()`.
 - **Architettura degli override** — *fatta* (`override.py`), con i tre tipi
   distinti:
   - scritture avviate da HA: soppresse tramite rilevamento echo (finestra di
@@ -281,15 +341,17 @@ progressive. Stato attuale di ciascun pezzo:
   = 12 min, scritture scaglionate di `WRITE_STAGGER_SECONDS` = 1.5 s).
   L'appiattimento del programma settimanale della 3550 stessa è *da fare* e
   richiede l'adattatore MyHOME.
-- **Servizi HA** — *fatti*: 13 servizi, elencati nel README. Oltre agli
-  override coprono giornate tipo (`set_day_template`, `paint_slots`,
-  `duplicate_day_template`, `delete_day_template`), settimane tipo, scenari e
-  setpoint. Attenzione: il nome storico in progettazione era `termo_zone.*`, ma
-  il dominio dell'integrazione è `ctha` e i servizi devono starci dentro.
-  `paint_slots` prende un intervallo e non uno slot proprio perché è la
-  primitiva su cui poggia il paint-drag della griglia.
-- **Interfaccia di programmazione** — *fatta*: griglia paint-drag, valori
-  ereditati mostrati con la loro fonte, vista delle dipendenze e scappatoia
+- **Servizi HA** — *fatti*: 15 servizi, elencati nel README. Oltre agli
+  override coprono livelli di temperatura (`set_level`, `delete_level`),
+  setpoint per ambito (`set_setpoint`), giornate tipo (`set_day_template`,
+  `paint_slots`, `duplicate_day_template`, `delete_day_template`), settimane
+  tipo e scenari. Attenzione: il nome storico in progettazione era
+  `termo_zone.*`, ma il dominio dell'integrazione è `ctha` e i servizi devono
+  starci dentro. `paint_slots` prende un intervallo e non uno slot proprio
+  perché è la primitiva su cui poggia il paint-drag della griglia.
+- **Interfaccia di programmazione** — *fatta*: quattro viste (Programma,
+  Scenari, Temperature, Zone), griglia paint-drag, editor della gerarchia con
+  valore proprio / ereditato / in vigore, vista delle dipendenze e scappatoia
   "duplica e scollega" al momento in cui serve.
 - **Adattatore verso il bus** — *fatto a metà*: la scrittura dei setpoint passa
   per `climate.set_temperature` sull'entità MyHOME della zona, che è tutto ciò

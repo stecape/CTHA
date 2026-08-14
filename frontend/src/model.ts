@@ -1,36 +1,34 @@
 // Funzioni pure sul modello: nessun React, nessun Home Assistant.
 //
-// Alcune duplicano ciò che fa `program.py` — le usanze di un template, il
-// risultato di una pennellata. La duplicazione è voluta e serve a una cosa
-// sola: mostrare l'effetto di un'azione *prima* del giro attraverso il
-// backend. La verità resta il backend, che rifiuta ciò che non è ammissibile;
-// qui si disegna soltanto.
+// Alcune duplicano ciò che fa il backend — le usanze di un template, il
+// risultato di una pennellata, la catena di ereditarietà. La duplicazione è
+// voluta e serve a una cosa sola: mostrare l'effetto di un'azione *prima* del
+// giro attraverso il backend. La verità resta il backend, che rifiuta ciò che
+// non è ammissibile; qui si disegna soltanto.
 
-import type { DayTemplate, Level, Program, Zone } from "./types";
-
-export const LEVELS: Level[] = ["comfort", "eco", "antifreeze"];
-
-export const LEVEL_LABEL: Record<Level, string> = {
-  comfort: "Comfort",
-  eco: "Eco",
-  antifreeze: "Antigelo",
-};
-
-export const CHAR_BY_LEVEL: Record<Level, string> = {
-  comfort: "c",
-  eco: "e",
-  antifreeze: "a",
-};
+import type {
+  DayTemplate,
+  Layer,
+  LevelId,
+  Program,
+  Scope,
+  Setpoints,
+  TemperatureLevel,
+  WeekTemplate,
+} from "./types";
 
 export const INHERIT_CHAR = "-";
 
-const LEVEL_BY_CHAR: Record<string, Level> = {
-  c: "comfort",
-  e: "eco",
-  a: "antifreeze",
-};
-
 export const SLOTS_PER_DAY = 48;
+
+export const LAYER_LABEL: Record<Layer, string> = {
+  day_template: "giornata tipo",
+  week_template: "settimana tipo",
+  zone: "zona",
+  scenario: "scenario",
+  global: "globale",
+  none: "nessuno",
+};
 
 export const WEEKDAYS = [
   "lunedì",
@@ -44,9 +42,20 @@ export const WEEKDAYS = [
 
 export const WEEKDAYS_SHORT = ["lun", "mar", "mer", "gio", "ven", "sab", "dom"];
 
-/** Livello dello slot, o `null` se eredita dal globale. */
-export function levelAt(slots: string, slot: number): Level | null {
-  return LEVEL_BY_CHAR[slots[slot] ?? INHERIT_CHAR] ?? null;
+/** I livelli nell'ordine in cui sono stati creati: è l'ordine che l'utente ha scelto. */
+export function levels(program: Program): TemperatureLevel[] {
+  return Object.values(program.levels);
+}
+
+/** Livello dipinto in uno slot, o `null` se lo slot eredita. */
+export function levelAt(
+  program: Program,
+  slots: string,
+  slot: number,
+): TemperatureLevel | null {
+  const char = slots[slot];
+  if (!char || char === INHERIT_CHAR) return null;
+  return levels(program).find((level) => level.char === char) ?? null;
 }
 
 /** Ora d'inizio dello slot, in formato 24 ore. */
@@ -67,10 +76,10 @@ export function paintedSlots(
   slots: string,
   start: number,
   end: number,
-  level: Level | null,
+  level: TemperatureLevel | null,
 ): string {
   const [from, to] = start <= end ? [start, end] : [end, start];
-  const char = level === null ? INHERIT_CHAR : CHAR_BY_LEVEL[level];
+  const char = level === null ? INHERIT_CHAR : level.char;
   return slots.slice(0, from) + char.repeat(to - from + 1) + slots.slice(to + 1);
 }
 
@@ -98,28 +107,41 @@ export function dayTemplateUsages(
 }
 
 export interface WeekUsage {
-  kind: "scenario" | "zone";
-  id: string;
-  name: string;
+  scenarioId: string;
+  scenarioName: string;
+  zones: string[];
 }
 
-/** Scenari e zone che seguono una settimana tipo. */
+/** Scenari che assegnano una settimana tipo, e a quali zone. */
 export function weekTemplateUsages(
   program: Program,
   templateId: string,
 ): WeekUsage[] {
-  return [
-    ...Object.values(program.scenarios)
-      .filter((scenario) => scenario.week_template === templateId)
-      .map((scenario) => ({
-        kind: "scenario" as const,
-        id: scenario.id,
-        name: scenario.name,
-      })),
-    ...Object.values(program.zones)
-      .filter((zone) => zone.week_template === templateId)
-      .map((zone) => ({ kind: "zone" as const, id: zone.id, name: zone.name })),
-  ];
+  return Object.values(program.scenarios)
+    .map((scenario) => ({
+      scenarioId: scenario.id,
+      scenarioName: scenario.name,
+      zones: Object.entries(scenario.zones)
+        .filter(([, weekId]) => weekId === templateId)
+        .map(([zoneId]) => program.zones[zoneId]?.name ?? zoneId),
+    }))
+    .filter((usage) => usage.zones.length > 0);
+}
+
+/** Giornate tipo che dipingono un livello, e in quanti slot. */
+export function levelUsages(
+  program: Program,
+  levelId: LevelId,
+): { id: string; name: string; slots: number }[] {
+  const level = program.levels[levelId];
+  if (!level) return [];
+  return Object.values(program.day_templates)
+    .map((template) => ({
+      id: template.id,
+      name: template.name,
+      slots: [...template.slots].filter((char) => char === level.char).length,
+    }))
+    .filter((usage) => usage.slots > 0);
 }
 
 /**
@@ -152,24 +174,138 @@ export function listDays(days: number[]): string {
   return `${names.slice(0, -1).join(", ")} e ${names[names.length - 1]}`;
 }
 
-/** Setpoint effettivo di una zona per un livello, con la sua provenienza. */
-export function effectiveSetpoint(
-  program: Program,
-  zone: Zone,
-  level: Level,
-): { value: number | undefined; inherited: boolean } {
-  const own = zone.setpoints[level];
-  if (own !== undefined && own !== null) {
-    return { value: own, inherited: false };
-  }
-  return { value: program.global_setpoints[level], inherited: true };
+// --- Gerarchia dei setpoint -------------------------------------------------
+
+export const GLOBAL_SCOPE: Scope = { layer: "global", id: "" };
+
+interface Holder {
+  layer: Layer;
+  id: string;
+  name: string;
+  setpoints: Setpoints;
 }
 
-/** Settimana tipo seguita dalla zona: la propria, altrimenti quella attiva. */
-export function weekTemplateForZone(program: Program, zone: Zone): string | null {
-  if (zone.week_template) return zone.week_template;
-  return program.scenarios[program.active_scenario]?.week_template ?? null;
+export interface Inherited {
+  value: number | undefined;
+  layer: Layer;
+  name: string;
 }
+
+/**
+ * Chi sta sopra a un punto della gerarchia, dal più vicino al globale.
+ *
+ * Un week template non ha un solo genitore: dipende da quale zona lo segue e
+ * in quale scenario. Qui si mostra la catena *tipica* — quella dello scenario
+ * attivo, e della prima zona che ci passa — perché è quella che l'utente sta
+ * guardando mentre programma. La risoluzione vera la fa il backend, zona per
+ * zona, e il pannello la rilegge dal runtime.
+ */
+export function ancestors(program: Program, scope: Scope): Holder[] {
+  const globalHolder: Holder = {
+    layer: "global",
+    id: "",
+    name: "Globale",
+    setpoints: program.global_setpoints,
+  };
+  const active = program.scenarios[program.active_scenario];
+  const scenarioHolder: Holder[] = active
+    ? [
+        {
+          layer: "scenario",
+          id: active.id,
+          name: active.name,
+          setpoints: active.setpoints,
+        },
+      ]
+    : [];
+
+  switch (scope.layer) {
+    case "global":
+      return [];
+    case "scenario":
+      return [globalHolder];
+    case "zone":
+      return [...scenarioHolder, globalHolder];
+    case "week_template": {
+      const zoneId = active
+        ? Object.entries(active.zones).find(
+            ([, weekId]) => weekId === scope.id,
+          )?.[0]
+        : undefined;
+      const zone = zoneId ? program.zones[zoneId] : undefined;
+      return zone
+        ? [
+            { layer: "zone", id: zone.id, name: zone.name, setpoints: zone.setpoints },
+            ...scenarioHolder,
+            globalHolder,
+          ]
+        : [...scenarioHolder, globalHolder];
+    }
+    case "day_template": {
+      const week = Object.values(program.week_templates).find((candidate) =>
+        Object.values(candidate.days).includes(scope.id),
+      );
+      if (!week) return [...scenarioHolder, globalHolder];
+      return [
+        {
+          layer: "week_template",
+          id: week.id,
+          name: week.name,
+          setpoints: week.setpoints,
+        },
+        ...ancestors(program, { layer: "week_template", id: week.id }),
+      ];
+    }
+    default:
+      return [globalHolder];
+  }
+}
+
+/** Valore che un punto della gerarchia erediterebbe, e da chi. */
+export function inherited(
+  program: Program,
+  scope: Scope,
+  level: LevelId,
+): Inherited {
+  for (const holder of ancestors(program, scope)) {
+    const value = holder.setpoints[level];
+    if (value !== undefined) {
+      return { value, layer: holder.layer, name: holder.name };
+    }
+  }
+  return { value: undefined, layer: "none", name: "nessuno" };
+}
+
+/** Tabella di setpoint di un punto della gerarchia. */
+export function setpointsOf(program: Program, scope: Scope): Setpoints {
+  switch (scope.layer) {
+    case "scenario":
+      return program.scenarios[scope.id]?.setpoints ?? {};
+    case "zone":
+      return program.zones[scope.id]?.setpoints ?? {};
+    case "week_template":
+      return program.week_templates[scope.id]?.setpoints ?? {};
+    case "day_template":
+      return program.day_templates[scope.id]?.setpoints ?? {};
+    default:
+      return program.global_setpoints;
+  }
+}
+
+/** Quanti setpoint propri dichiara un elemento: serve a segnalarlo negli elenchi. */
+export function ownSetpointCount(setpoints: Setpoints): number {
+  return Object.keys(setpoints).length;
+}
+
+/** Settimana tipo che una zona segue nello scenario attivo. */
+export function weekTemplateForZone(
+  program: Program,
+  zoneId: string,
+): string | null {
+  return program.scenarios[program.active_scenario]?.zones[zoneId] ?? null;
+}
+
+// --- Formattazione ----------------------------------------------------------
 
 /** Identificatore tecnico ricavato da un nome scritto a mano. */
 export function slugify(name: string): string {
@@ -195,14 +331,16 @@ export function formatTemp(value: number | null | undefined): string {
   return value === null || value === undefined ? "—" : `${value.toFixed(1)} °C`;
 }
 
-export function formatOffset(value: number): string {
-  if (value === 0) return "0 °C";
-  return `${value > 0 ? "+" : "−"}${Math.abs(value).toFixed(1)} °C`;
+/** Giornate tipo in ordine alfabetico, per i menù. */
+export function sortedDayTemplates(program: Program): DayTemplate[] {
+  return Object.values(program.day_templates).sort((a, b) =>
+    a.name.localeCompare(b.name, "it"),
+  );
 }
 
-/** Giornate tipo in ordine alfabetico, per i menù. */
-export function sortedTemplates(program: Program): DayTemplate[] {
-  return Object.values(program.day_templates).sort((a, b) =>
+/** Settimane tipo in ordine alfabetico, per i menù. */
+export function sortedWeekTemplates(program: Program): WeekTemplate[] {
+  return Object.values(program.week_templates).sort((a, b) =>
     a.name.localeCompare(b.name, "it"),
   );
 }

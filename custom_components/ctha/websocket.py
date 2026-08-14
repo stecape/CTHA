@@ -24,10 +24,11 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import (
     DOMAIN,
-    LEVELS,
+    INHERIT_CHAR,
     MAX_TEMP,
     MIN_TEMP,
     OVERRIDE_POLICIES,
+    SETPOINT_LAYERS,
     SLOT_MINUTES,
     SLOTS_PER_DAY,
     TEMP_STEP,
@@ -85,10 +86,14 @@ def _snapshot(coordinator: CthaCoordinator) -> dict[str, Any]:
             for zone_id in coordinator.data.zones
         },
         "meta": {
-            "levels": list(LEVELS),
+            # La gerarchia dei setpoint viaggia col resto: il pannello deve
+            # mostrare *quale* livello ha deciso un valore, e l'ordine è uno
+            # solo — quello di `resolve.py`.
+            "layers": list(SETPOINT_LAYERS),
             "policies": list(OVERRIDE_POLICIES),
             "slots_per_day": SLOTS_PER_DAY,
             "slot_minutes": SLOT_MINUTES,
+            "inherit_char": INHERIT_CHAR,
             "min_temp": MIN_TEMP,
             "max_temp": MAX_TEMP,
             "temp_step": TEMP_STEP,
@@ -99,15 +104,17 @@ def _snapshot(coordinator: CthaCoordinator) -> dict[str, Any]:
 def _zone_runtime(coordinator: CthaCoordinator, zone_id: str) -> dict[str, Any]:
     """Cosa sta tenendo la zona in questo momento, e da dove viene il valore."""
     resolution = coordinator.resolution_for(zone_id)
+    chain = coordinator.chain_for(zone_id)
     override = coordinator.overrides.get(zone_id)
     return {
         "entity_id": coordinator.entity_ids.get(zone_id),
         "level": resolution.level,
-        "base": resolution.base,
         "source": resolution.source,
-        "offset": resolution.offset,
         "scheduled": resolution.temperature,
         "target": coordinator.target_for(zone_id),
+        "week_template": chain.week.id if chain.week else None,
+        "day_template": chain.day.id if chain.day else None,
+        "slot": chain.slot,
         "override": override.to_dict() if override is not None else None,
     }
 

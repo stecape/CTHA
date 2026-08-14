@@ -7,7 +7,7 @@ i sottomoduli si importano regolarmente, gli import relativi funzionano, e
 l'`__init__.py` vero non viene mai eseguito.
 
 Vale solo per i moduli che non toccano HA — `const`, `models`, `resolve`,
-`override`, `program`. Il resto del componente va testato con
+`override`, `program`, `migrate`. Il resto del componente va testato con
 `pytest-homeassistant-custom-component`.
 """
 
@@ -27,19 +27,25 @@ if "ctha" not in sys.modules:
     _stub.__path__ = [str(PACKAGE_DIR)]
     sys.modules["ctha"] = _stub
 
-from ctha import models  # noqa: E402  (dipende dallo stub registrato sopra)
-from ctha.const import LEVEL_COMFORT  # noqa: E402
+from ctha import models, program  # noqa: E402  (dipende dallo stub registrato sopra)
 
 # Martedì, così il weekday (1) non coincide con lo slot né con l'indice zero.
+# Alle 07:00 la giornata tipo di default è «alta», alle 03:00 «bassa».
 MORNING = datetime(2026, 8, 11, 7, 0)
 NIGHT = datetime(2026, 8, 11, 3, 0)
+
+# I livelli iniziali, quelli che `CthaData.default()` crea.
+HIGH = "alta"
+MEDIUM = "media"
+LOW = "bassa"
+ANTIFREEZE = "antigelo"
 
 
 @pytest.fixture
 def data() -> models.CthaData:
     """Modello di default con una zona registrata, come dopo la prima entry."""
     model = models.CthaData.default()
-    model.zones["z1"] = models.Zone(id="z1", name="Soggiorno")
+    program.ensure_zone(model, "z1", "Soggiorno")
     return model
 
 
@@ -50,6 +56,8 @@ def zone(data: models.CthaData) -> models.Zone:
 
 
 @pytest.fixture
-def comfort() -> str:
-    """Livello usato dalla maggior parte dei casi sull'asse termico."""
-    return LEVEL_COMFORT
+def scenario(data: models.CthaData) -> models.Scenario:
+    """Lo scenario attivo, cioè la configurazione delle zone in vigore."""
+    active = data.active()
+    assert active is not None
+    return active

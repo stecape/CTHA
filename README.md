@@ -20,15 +20,34 @@ offset dalla manopola fisica, che richiede l'adattatore MyHOME (vedi
 
 ## Come funziona
 
+Si parte dalle **giornate tipo**, con granularità di 30 minuti, e se ne fanno
+quante servono. Da quelle si costruiscono le **settimane tipo**. Uno **scenario**
+è la configurazione delle zone: a ciascuna zona assegna una settimana tipo. Da lì
+in poi l'unico gesto è scegliere lo scenario attivo, e il componente esegue
+quello.
+
 Il setpoint di una zona nasce dall'incrocio di due assi tenuti separati:
 
-- **asse temporale** — scenario → week template → day template → slot → livello.
-  Un day template è una stringa di 48 caratteri, uno ogni 30 minuti.
-- **asse termico** — setpoint di zona → offset di scenario → setpoint globale.
-  Un valore assente o `null` significa *eredita*, esplicitamente.
+- **asse temporale** — scenario attivo → settimana tipo della zona → giornata
+  tipo del giorno → slot → livello. Una giornata tipo è una stringa di 48
+  caratteri, uno ogni 30 minuti.
+- **asse termico** — le temperature si creano liberamente (di default *alta*,
+  *media*, *bassa*, *antigelo*) e si sovrascrivono lungo questa gerarchia:
+
+  ```
+  Global
+  └─ Scenario
+     └─ Zona
+        └─ Week template
+           └─ Day template
+  ```
+
+  Chi sta più in basso vince; chi non dichiara nulla eredita da chi sta sopra.
+  Il globale è la radice e non può ereditare da nessuno.
 
 `resolve_setpoint` è una funzione pura che li combina: dato il modello, la zona
-e un istante, restituisce la temperatura e la sua provenienza.
+e un istante, restituisce la temperatura e **quale livello della gerarchia l'ha
+decisa**.
 
 Sopra al programma stanno gli **override**, distinti per sorgente perché vanno
 trattati diversamente:
@@ -58,8 +77,10 @@ errore da correggere all'istante.
   trascinamento
 - Una entità `climate` per zona, sopra al termostato reale, configurabile dalla
   UI senza YAML
-- Programma settimanale a scenari con template riutilizzabili
-- Livelli `comfort`, `eco`, `antifreeze` con ereditarietà zona → globale
+- Scenari come configurazione delle zone: uno scenario dice, per ogni zona,
+  quale settimana tipo seguire — cambiarlo riprogramma l'impianto in un gesto
+- Livelli di temperatura definibili dall'utente (di default alta, media, bassa,
+  antigelo), con ereditarietà su cinque livelli
 - Override con quattro politiche di scadenza e soppressione delle eco
 - Persistenza su Store dedicato, separata dalla config entry
 - Servizi per override, template, scenari e setpoint, usabili dalle automazioni
@@ -97,8 +118,11 @@ Home Assistant.
 volta per zona: un nome e il termostato che governa quella zona. Una zona per
 termostato.
 
-Al primo avvio viene creato un programma di default: notte in eco, risveglio e
-sera in comfort, uguale per tutti i giorni.
+Al primo avvio vengono creati quattro livelli di temperatura (alta 21 °C,
+media 19 °C, bassa 17 °C, antigelo 7 °C) e un programma di default: notte
+bassa, mattina e sera alte, giornata media, uguale per tutti i giorni. Ogni
+zona aggiunta in seguito viene assegnata a quella settimana tipo in tutti gli
+scenari esistenti, così comincia a funzionare senza aprire il pannello.
 
 Per ogni zona nasce una entità `climate` di CTHA, che affianca quella del
 termostato reale: mostra la stessa temperatura misurata, ma il suo target è
@@ -113,16 +137,22 @@ resta spenta CTHA non le scrive più setpoint.
 ## Il pannello
 
 Con la prima zona compare **Cronotermostato** nella sidebar (solo per gli
-amministratori). Tre viste, che ricalcano l'architettura:
+amministratori). Quattro viste, che ricalcano l'architettura:
 
 - **Programma** — l'asse temporale. Sette righe da 48 mezz'ore: si sceglie un
-  pennello (comfort, eco, antigelo, eredita) e si trascina. Sotto, l'elenco
-  delle giornate e settimane tipo con *chi le usa*.
-- **Temperature** — l'asse termico. Setpoint globali, eccezioni per zona (un
-  campo vuoto eredita e mostra in grigio il valore ereditato) e scenari con i
-  loro offset.
-- **Zone** — lo stato adesso: temperatura misurata, setpoint applicato, da dove
-  viene, e l'eventuale override con la sua scadenza.
+  pennello (un livello di temperatura, o «eredita») e si trascina. Sotto,
+  l'elenco delle giornate e settimane tipo con *chi le usa*.
+- **Scenari** — la configurazione delle zone. Per ogni scenario la tabella zona
+  → settimana tipo, per intero: prima di attivare uno scenario si vede cosa
+  farà a ciascuna zona.
+- **Temperature** — l'asse termico. I livelli (nome, colore, setpoint globale,
+  creazione ed eliminazione) e l'editor della gerarchia: si sceglie un punto —
+  globale, scenario, zona, settimana tipo, giornata tipo — e per ogni livello si
+  vede il valore proprio, quello che erediterebbe e da chi, e quello in vigore.
+  Un campo vuoto eredita; svuotarlo è il modo di tornare a ereditare.
+- **Zone** — lo stato adesso: temperatura misurata, setpoint applicato, da quale
+  livello della gerarchia viene, che programma sta seguendo, e l'eventuale
+  override con la sua scadenza.
 
 **Le giornate tipo sono condivise.** Una riga marcata *condivisa* usa lo stesso
 template di altri giorni: dipingerla li cambia tutti. Il pannello se ne accorge
@@ -135,17 +165,19 @@ copia indipendente.
 |---|---|
 | `ctha.set_override` | forza una temperatura su una zona |
 | `ctha.clear_override` | riporta la zona al programma |
+| `ctha.set_level` | crea o aggiorna un livello di temperatura |
+| `ctha.delete_level` | elimina un livello non più dipinto |
+| `ctha.set_setpoint` | scrive una temperatura in un punto della gerarchia |
 | `ctha.set_day_template` | crea o aggiorna una giornata tipo |
 | `ctha.paint_slots` | dipinge un livello su un intervallo di slot |
 | `ctha.duplicate_day_template` | duplica una giornata tipo e la riaggancia |
 | `ctha.delete_day_template` | elimina una giornata tipo non più usata |
 | `ctha.set_week_template` | crea o aggiorna una settimana tipo |
 | `ctha.delete_week_template` | elimina una settimana tipo non più usata |
-| `ctha.set_scenario` | crea o aggiorna uno scenario e i suoi offset |
+| `ctha.set_scenario` | crea o aggiorna uno scenario e la sua mappa delle zone |
 | `ctha.delete_scenario` | elimina uno scenario non attivo |
 | `ctha.activate_scenario` | cambia lo scenario attivo |
-| `ctha.set_setpoint` | imposta un setpoint globale o di zona |
-| `ctha.set_zone_week_template` | dà a una zona un programma proprio |
+| `ctha.set_zone_week_template` | assegna la settimana tipo di una zona in uno scenario |
 
 I servizi `set_*` creano l'elemento se l'id non esiste e aggiornano solo i campi
 indicati: la stessa chiamata, ripetuta, converge sempre sullo stesso risultato.
@@ -164,19 +196,19 @@ data:
 ### Costruire un programma
 
 ```yaml
-# Una giornata tipo per il fine settimana, comfort dalle 08:00 alle 23:00
+# Una giornata tipo per il fine settimana, alta dalle 08:00 alle 23:00
 action: ctha.set_day_template
 data:
   template_id: weekend
   name: Weekend
-  slots: "eeeeeeeeeeeeeeee--------------------------------"
+  slots: "bbbbbbbbbbbbbbbb--------------------------------"
 
 action: ctha.paint_slots
 data:
   template_id: weekend
   start_slot: 16      # 08:00
   end_slot: 45        # 22:30 compreso
-  level: comfort
+  level: alta
 
 # ...e assegnarla a sabato e domenica (0 = lunedì)
 action: ctha.set_week_template
@@ -198,38 +230,81 @@ data:
   days: [6]           # solo la domenica passa alla copia
 ```
 
-### Scenari e setpoint
+### Scenari
+
+Uno scenario nuovo parte dalla configurazione di quello attivo, poi si cambia
+solo ciò che deve cambiare:
 
 ```yaml
 action: ctha.set_scenario
 data:
   scenario_id: vacanza
   name: Vacanza
-  offset: -4          # tutta la casa 4 °C più fredda
-  zone_offsets:
-    01J8ZQ4P7K3W2X9Y: 0    # tranne questa zona
+  zones:
+    01J8ZQ4P7K3W2X9Y: ridotta     # questa zona segue la settimana "ridotta"
+    01J8ZQ4P7K3W2X9Z: null        # questa non è programmata affatto
 
 action: ctha.activate_scenario
 data:
   scenario_id: vacanza
 
-# Setpoint globale del livello comfort
+# Assegnazione singola, sullo scenario attivo se non se ne indica un altro
+action: ctha.set_zone_week_template
+data:
+  zone_id: 01J8ZQ4P7K3W2X9Y
+  template_id: ridotta
+```
+
+### Temperature
+
+I livelli si creano come tutto il resto, e ognuno prende un carattere libero
+per le giornate tipo:
+
+```yaml
+action: ctha.set_level
+data:
+  level: notte
+  name: Notte
+  color: "#5566aa"
+  temperature: 16       # setpoint globale del livello
+```
+
+Un setpoint si scrive in **un** punto della gerarchia: senza ambito è il
+globale, altrimenti si indica lo scenario, la zona, la settimana tipo o la
+giornata tipo. Senza temperatura quel punto torna a ereditare.
+
+```yaml
+# Radice: vale per chiunque non dica diversamente
 action: ctha.set_setpoint
 data:
-  level: comfort
+  level: alta
   temperature: 21.5
 
-# ...e l'eccezione di una zona; senza temperatura torna a ereditare
+# In vacanza «alta» vale 17, ovunque
 action: ctha.set_setpoint
 data:
-  level: comfort
-  temperature: 20.0
+  level: alta
+  temperature: 17
+  scenario_id: vacanza
+
+# Il bagno però la vuole a 23 comunque: la zona sta più in basso e vince
+action: ctha.set_setpoint
+data:
+  level: alta
+  temperature: 23
+  zone_id: 01J8ZQ4P7K3W2X9Y
+
+# ...e ci ripensa: torna a ereditare
+action: ctha.set_setpoint
+data:
+  level: alta
   zone_id: 01J8ZQ4P7K3W2X9Y
 ```
 
 Le cancellazioni rifiutano di spezzare il programma: `delete_day_template` e
 `delete_week_template` falliscono se qualcuno usa ancora l'elemento, dicendo
-chi; `delete_scenario` non tocca né lo scenario attivo né l'ultimo rimasto.
+chi; `delete_level` fallisce se il livello è ancora dipinto da qualche parte;
+`delete_scenario` non tocca né lo scenario attivo né l'ultimo rimasto.
 
 ## Struttura del repository
 
@@ -238,8 +313,9 @@ custom_components/ctha/
 ├── __init__.py       # setup/unload delle entry, runtime condiviso
 ├── climate.py        # entità climate di zona, scrittura del setpoint
 ├── config_flow.py    # config flow: nome della zona e termostato
-├── const.py          # domain, chiavi, livelli, timing, default
+├── const.py          # domain, chiavi, gerarchia, timing, default
 ├── coordinator.py    # runtime: programma, override, watchdog
+├── migrate.py        # migrazione dei dati fra versioni dello Store
 ├── models.py         # modello dati serializzabile
 ├── override.py       # policy di scadenza e soppressione echo
 ├── panel.py          # registrazione del pannello e del percorso statico
@@ -261,8 +337,9 @@ tests/                # suite sul nucleo puro, non serve Home Assistant
 
 ### Backend
 
-`const.py`, `models.py`, `resolve.py`, `override.py` e `program.py` non
-importano `homeassistant`: sono verificabili senza far girare HA.
+`const.py`, `models.py`, `resolve.py`, `override.py`, `program.py` e
+`migrate.py` non importano `homeassistant`: sono verificabili senza far
+girare HA.
 
 ```bash
 python -m venv .venv
@@ -289,6 +366,8 @@ npm run watch     # ricompila a ogni salvataggio
 - [x] Pannello React in sidebar per la griglia di programmazione (paint-drag)
 - [x] Vista delle dipendenze "chi usa questo template" nell'interfaccia
 - [x] Scrittura del setpoint sul termostato di zona
+- [x] Livelli di temperatura definibili dall'utente
+- [x] Scenari come configurazione delle zone ed ereditarietà a cinque livelli
 - [ ] Lettura dei messaggi di offset locale dell'F430/4, per distinguere la
       manopola fisica (override `hardware`) dalle altre sorgenti esterne
 - [ ] Appiattimento del programma dell'unità centrale 3550

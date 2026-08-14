@@ -1,21 +1,24 @@
 // Guscio del pannello: sottoscrizione, scelta della vista, errori.
 //
-// Le due viste principali ricalcano i due assi dell'architettura, e non è una
-// coincidenza estetica: "Programma" è l'asse temporale (quale livello, quando),
-// "Temperature" è l'asse termico (quanti gradi vale un livello, per chi).
-// Tenerli separati nell'interfaccia è ciò che permette di cambiare le
-// temperature senza rimettere mano al programma, e viceversa.
+// Le quattro viste ricalcano l'architettura, e non è una coincidenza estetica:
+// "Programma" è l'asse temporale (quale livello, quando), "Scenari" è la
+// configurazione delle zone (chi segue quale settimana), "Temperature" è
+// l'asse termico con la sua gerarchia (quanti gradi, deciso dove), "Zone" è
+// cosa sta succedendo adesso. Tenerli separati è ciò che permette di cambiare
+// le temperature senza rimettere mano al programma, e viceversa.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, errorMessage, subscribe } from "./api";
 import { ProgramTab } from "./ProgramTab";
+import { ScenariosTab } from "./ScenariosTab";
 import { TemperaturesTab } from "./TemperaturesTab";
 import type { HomeAssistant, Run, Snapshot } from "./types";
 import { ZonesTab } from "./ZonesTab";
 
 const TABS = [
   { id: "programma", label: "Programma" },
+  { id: "scenari", label: "Scenari" },
   { id: "temperature", label: "Temperature" },
   { id: "zone", label: "Zone" },
 ] as const;
@@ -72,6 +75,9 @@ export function App({ hass }: { hass: HomeAssistant }) {
 
   const { program } = snapshot;
   const active = program.scenarios[program.active_scenario];
+  const unscheduled = Object.keys(program.zones).filter(
+    (zoneId) => !active?.zones[zoneId],
+  ).length;
 
   return (
     <div className="layout">
@@ -106,10 +112,12 @@ export function App({ hass }: { hass: HomeAssistant }) {
               ))}
             </select>
           </label>
-          {active && active.offset !== 0 && (
-            <span className="badge">
-              {active.offset > 0 ? "+" : "−"}
-              {Math.abs(active.offset).toFixed(1)} °C su tutto
+          {unscheduled > 0 && (
+            <span
+              className="badge"
+              title="In questo scenario non hanno una settimana tipo, quindi non ricevono setpoint"
+            >
+              {unscheduled} zone non programmate
             </span>
           )}
         </div>
@@ -118,6 +126,7 @@ export function App({ hass }: { hass: HomeAssistant }) {
       {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
 
       {tab === "programma" && <ProgramTab snapshot={snapshot} run={run} />}
+      {tab === "scenari" && <ScenariosTab snapshot={snapshot} run={run} />}
       {tab === "temperature" && (
         <TemperaturesTab snapshot={snapshot} run={run} />
       )}

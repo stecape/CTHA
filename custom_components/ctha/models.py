@@ -2,8 +2,13 @@
 
 Il modello è basato su riferimenti: scenari, week template e day template si
 citano per identificatore anziché duplicare i dati, così un template può essere
-riusato da più giorni e da più scenari. Il valore `None` non è un "non so": è
-la rappresentazione esplicita dell'ereditarietà dal livello superiore.
+riusato da più giorni e da più scenari.
+
+Cinque elementi portano una tabella `setpoints` (livello → °C): il globale, lo
+scenario, la zona, la settimana tipo e la giornata tipo. Un livello assente da
+una tabella non è un "non so": è la richiesta esplicita di ereditare da chi sta
+sopra nella gerarchia. Quale sia il "sopra" lo decide `resolve.py`, che è
+l'unico posto in cui l'ordine è scritto.
 """
 
 from __future__ import annotations
@@ -15,11 +20,12 @@ from typing import Any, Self
 from .const import (
     DEFAULT_DAY_SLOTS,
     DEFAULT_DAY_TEMPLATE_ID,
-    DEFAULT_GLOBAL_SETPOINTS,
+    DEFAULT_LEVEL_COLOR,
+    DEFAULT_LEVELS,
     DEFAULT_SCENARIO_ID,
     DEFAULT_WEEK_TEMPLATE_ID,
     INHERIT_CHAR,
-    LEVEL_BY_CHAR,
+    LEVEL_CHARS,
     OVERRIDE_SOURCE_HA,
     POLICY_NEXT_SLOT,
     SLOTS_PER_DAY,
@@ -31,16 +37,62 @@ class InvalidTemplateError(ValueError):
 
 
 def validate_slots(slots: str) -> str:
-    """Verifica che una stringa di slot sia lunga 48 e usi caratteri noti."""
+    """Verifica lunghezza e alfabeto di una stringa di slot.
+
+    Qui si controlla solo la forma: che i caratteri corrispondano a livelli
+    davvero esistenti è una domanda sul modello intero, e la fa `program.py`.
+    Tenerla fuori dal dataclass permette di ricostruire dallo Store un template
+    che cita un livello eliminato, invece di rifiutare l'intero salvataggio.
+    """
     if len(slots) != SLOTS_PER_DAY:
         raise InvalidTemplateError(
             f"Un day template richiede {SLOTS_PER_DAY} caratteri, ricevuti {len(slots)}"
         )
-    if unknown := set(slots) - set(LEVEL_BY_CHAR) - {INHERIT_CHAR}:
+    if unknown := set(slots) - set(LEVEL_CHARS) - {INHERIT_CHAR}:
         raise InvalidTemplateError(
             f"Caratteri non validi nel day template: {sorted(unknown)}"
         )
     return slots
+
+
+def _setpoints(raw: Any) -> dict[str, float]:
+    """Tabella di setpoint ripulita: i valori vuoti sono assenze, non zeri."""
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(level): float(value) for level, value in raw.items() if value is not None
+    }
+
+
+@dataclass(slots=True)
+class TemperatureLevel:
+    """Un livello di temperatura: «alta», «antigelo», o qualsiasi altro.
+
+    `char` è il carattere che rappresenta il livello dentro i day template, e
+    non cambia mai dopo la creazione: cambiarlo vorrebbe dire riscrivere tutte
+    le giornate tipo che lo usano. `color` serve al pannello, che senza un
+    colore per livello non potrebbe disegnare una griglia leggibile una volta
+    che i livelli non sono più tre noti in anticipo.
+    """
+
+    id: str
+    name: str
+    char: str
+    color: str = DEFAULT_LEVEL_COLOR
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serializza il livello."""
+        return {"id": self.id, "name": self.name, "char": self.char, "color": self.color}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Self:
+        """Ricostruisce il livello dallo Store."""
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            char=data["char"],
+            color=data.get("color", DEFAULT_LEVEL_COLOR),
+        )
 
 
 @dataclass(slots=True)
@@ -50,24 +102,35 @@ class DayTemplate:
     id: str
     name: str
     slots: str = DEFAULT_DAY_SLOTS
+    setpoints: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Rifiuta subito i template malformati, prima che finiscano nello Store."""
         validate_slots(self.slots)
 
-    def level_at(self, slot: int) -> str | None:
-        """Livello dello slot indicato, o `None` se eredita dal globale."""
+    def char_at(self, slot: int) -> str | None:
+        """Carattere dello slot indicato, o `None` se lo slot eredita."""
         char = self.slots[slot % SLOTS_PER_DAY]
-        return LEVEL_BY_CHAR.get(char)
+        return None if char == INHERIT_CHAR else char
 
     def to_dict(self) -> dict[str, Any]:
         """Serializza il template."""
-        return {"id": self.id, "name": self.name, "slots": self.slots}
+        return {
+            "id": self.id,
+            "name": self.name,
+            "slots": self.slots,
+            "setpoints": dict(self.setpoints),
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Self:
         """Ricostruisce il template dallo Store."""
-        return cls(id=data["id"], name=data["name"], slots=data["slots"])
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            slots=data["slots"],
+            setpoints=_setpoints(data.get("setpoints")),
+        )
 
 
 @dataclass(slots=True)
@@ -77,6 +140,7 @@ class WeekTemplate:
     id: str
     name: str
     days: dict[int, str] = field(default_factory=dict)
+    setpoints: dict[str, float] = field(default_factory=dict)
 
     def day_template_id(self, weekday: int) -> str | None:
         """Id del day template associato al giorno, se assegnato."""
@@ -88,6 +152,7 @@ class WeekTemplate:
             "id": self.id,
             "name": self.name,
             "days": {str(day): template for day, template in self.days.items()},
+            "setpoints": dict(self.setpoints),
         }
 
     @classmethod
@@ -97,35 +162,40 @@ class WeekTemplate:
             id=data["id"],
             name=data["name"],
             days={int(day): template for day, template in data.get("days", {}).items()},
+            setpoints=_setpoints(data.get("setpoints")),
         )
 
 
 @dataclass(slots=True)
 class Scenario:
-    """Modalità di esercizio: una settimana tipo più offset termici.
+    """Configurazione delle zone: a ciascuna la sua settimana tipo.
 
-    Lo scenario agisce solo sull'asse termico tramite `offsets`: non cambia il
-    livello risolto per lo slot, ma sposta la temperatura che ne deriva.
+    Uno scenario *è* la mappa zona → settimana tipo. Cambiare scenario è
+    l'unico gesto che riprogramma tutto l'impianto in una volta, ed è il motivo
+    per cui l'assegnazione sta qui e non sulla zona: una zona non può seguire
+    due settimane diverse nello stesso scenario, ma deve poterne seguire una
+    diversa in ciascuno.
+
+    Una zona assente dalla mappa non è programmata in questo scenario: nessun
+    livello, nessun setpoint scritto.
     """
 
     id: str
     name: str
-    week_template: str = DEFAULT_WEEK_TEMPLATE_ID
-    offset: float = 0.0
-    zone_offsets: dict[str, float] = field(default_factory=dict)
+    zones: dict[str, str] = field(default_factory=dict)
+    setpoints: dict[str, float] = field(default_factory=dict)
 
-    def offset_for(self, zone_id: str) -> float:
-        """Offset applicabile alla zona, con fallback su quello di scenario."""
-        return self.zone_offsets.get(zone_id, self.offset)
+    def week_template_for(self, zone_id: str) -> str | None:
+        """Settimana tipo assegnata alla zona in questo scenario."""
+        return self.zones.get(zone_id)
 
     def to_dict(self) -> dict[str, Any]:
         """Serializza lo scenario."""
         return {
             "id": self.id,
             "name": self.name,
-            "week_template": self.week_template,
-            "offset": self.offset,
-            "zone_offsets": dict(self.zone_offsets),
+            "zones": dict(self.zones),
+            "setpoints": dict(self.setpoints),
         }
 
     @classmethod
@@ -134,37 +204,28 @@ class Scenario:
         return cls(
             id=data["id"],
             name=data["name"],
-            week_template=data.get("week_template", DEFAULT_WEEK_TEMPLATE_ID),
-            offset=data.get("offset", 0.0),
-            zone_offsets=dict(data.get("zone_offsets", {})),
+            zones=dict(data.get("zones", {})),
+            setpoints=_setpoints(data.get("setpoints")),
         )
 
 
 @dataclass(slots=True)
 class Zone:
-    """Zona termica: setpoint propri (o ereditati) e week template opzionale.
+    """Zona termica: l'identità di un ambiente e le sue temperature proprie.
 
-    `setpoints` mappa livello -> temperatura; un livello assente, o mappato a
-    `None`, eredita dal setpoint globale.
+    La zona non sa quale programma segue — glielo assegna lo scenario attivo.
+    Quello che le appartiene sono i gradi: `setpoints` è la tabella con cui un
+    ambiente dice "io la bassa la voglio a 18", indipendentemente da quale
+    scenario sia in corso.
     """
 
     id: str
     name: str
-    setpoints: dict[str, float | None] = field(default_factory=dict)
-    week_template: str | None = None
-
-    def setpoint_for(self, level: str) -> float | None:
-        """Setpoint proprio della zona per il livello, se non eredita."""
-        return self.setpoints.get(level)
+    setpoints: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Serializza la zona."""
-        return {
-            "id": self.id,
-            "name": self.name,
-            "setpoints": dict(self.setpoints),
-            "week_template": self.week_template,
-        }
+        return {"id": self.id, "name": self.name, "setpoints": dict(self.setpoints)}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Self:
@@ -172,8 +233,7 @@ class Zone:
         return cls(
             id=data["id"],
             name=data["name"],
-            setpoints=dict(data.get("setpoints", {})),
-            week_template=data.get("week_template"),
+            setpoints=_setpoints(data.get("setpoints")),
         )
 
 
@@ -229,9 +289,8 @@ def _parse_dt(value: str | None) -> datetime | None:
 class CthaData:
     """Radice del modello: tutto ciò che CTHA persiste."""
 
-    global_setpoints: dict[str, float] = field(
-        default_factory=lambda: dict(DEFAULT_GLOBAL_SETPOINTS)
-    )
+    levels: dict[str, TemperatureLevel] = field(default_factory=dict)
+    global_setpoints: dict[str, float] = field(default_factory=dict)
     day_templates: dict[str, DayTemplate] = field(default_factory=dict)
     week_templates: dict[str, WeekTemplate] = field(default_factory=dict)
     scenarios: dict[str, Scenario] = field(default_factory=dict)
@@ -242,6 +301,10 @@ class CthaData:
     @classmethod
     def default(cls) -> Self:
         """Costruisce un modello minimo ma già funzionante al primo avvio."""
+        levels = {
+            level_id: TemperatureLevel(level_id, name, char, color)
+            for level_id, name, char, color, _ in DEFAULT_LEVELS
+        }
         day = DayTemplate(
             id=DEFAULT_DAY_TEMPLATE_ID, name="Giornata tipo", slots=DEFAULT_DAY_SLOTS
         )
@@ -250,10 +313,14 @@ class CthaData:
             name="Settimana tipo",
             days={weekday: DEFAULT_DAY_TEMPLATE_ID for weekday in range(7)},
         )
-        scenario = Scenario(
-            id=DEFAULT_SCENARIO_ID, name="Normale", week_template=week.id
-        )
+        # Nessuna zona ancora: le zone nascono con le config entry, e sono le
+        # entry a farsi assegnare una settimana tipo negli scenari esistenti.
+        scenario = Scenario(id=DEFAULT_SCENARIO_ID, name="Normale")
         return cls(
+            levels=levels,
+            global_setpoints={
+                level_id: setpoint for level_id, _, _, _, setpoint in DEFAULT_LEVELS
+            },
             day_templates={day.id: day},
             week_templates={week.id: week},
             scenarios={scenario.id: scenario},
@@ -263,9 +330,27 @@ class CthaData:
         """Scenario attivo, se ancora esistente."""
         return self.scenarios.get(self.active_scenario)
 
+    def level_for_char(self, char: str | None) -> str | None:
+        """Id del livello rappresentato da un carattere del day template.
+
+        Restituisce `None` anche per un carattere orfano: un livello eliminato
+        mentre qualche template lo citava ancora non deve mandare in errore la
+        risoluzione, deve solo smettere di imporre un livello.
+        """
+        if char is None:
+            return None
+        return next(
+            (level.id for level in self.levels.values() if level.char == char), None
+        )
+
+    def level_at(self, template: DayTemplate, slot: int) -> str | None:
+        """Livello imposto da uno slot di una giornata tipo, se ne impone uno."""
+        return self.level_for_char(template.char_at(slot))
+
     def to_dict(self) -> dict[str, Any]:
         """Serializza l'intero modello per lo Store."""
         return {
+            "levels": {k: v.to_dict() for k, v in self.levels.items()},
             "global_setpoints": dict(self.global_setpoints),
             "day_templates": {k: v.to_dict() for k, v in self.day_templates.items()},
             "week_templates": {k: v.to_dict() for k, v in self.week_templates.items()},
@@ -279,10 +364,11 @@ class CthaData:
     def from_dict(cls, data: dict[str, Any]) -> Self:
         """Ricostruisce il modello dallo Store."""
         return cls(
-            global_setpoints={
-                **DEFAULT_GLOBAL_SETPOINTS,
-                **data.get("global_setpoints", {}),
+            levels={
+                k: TemperatureLevel.from_dict(v)
+                for k, v in data.get("levels", {}).items()
             },
+            global_setpoints=_setpoints(data.get("global_setpoints")),
             day_templates={
                 k: DayTemplate.from_dict(v)
                 for k, v in data.get("day_templates", {}).items()

@@ -1,8 +1,8 @@
 /* Il pannello vive in uno shadow root: nessun rischio di collisione, quindi
    niente prefissi. I colori si appoggiano alle variabili del tema di Home
    Assistant, con un fallback per quando il pannello viene aperto fuori da un
-   tema completo. I colori dei livelli sono invece fissi: sono un codice, e un
-   codice deve restare lo stesso passando da tema chiaro a tema scuro. */
+   tema completo. I colori dei livelli non sono qui: i livelli si creano dal
+   pannello, quindi il colore è un dato del modello e arriva inline. */
 
 :host {
   --ctha-bg: var(--primary-background-color, #f2f3f5);
@@ -14,9 +14,6 @@
   --ctha-error: var(--error-color, #c62828);
   --ctha-radius: 12px;
 
-  --ctha-comfort: #e0703c;
-  --ctha-eco: #3f9d7c;
-  --ctha-antifreeze: #4a7fbf;
   --ctha-inherit: color-mix(in srgb, var(--ctha-muted) 22%, transparent);
 
   display: block;
@@ -236,18 +233,6 @@ label.field {
   display: inline-block;
 }
 
-.swatch.comfort {
-  background: var(--ctha-comfort);
-}
-
-.swatch.eco {
-  background: var(--ctha-eco);
-}
-
-.swatch.antifreeze {
-  background: var(--ctha-antifreeze);
-}
-
 .swatch.inherit {
   background: var(--ctha-inherit);
   border: 1px dashed var(--ctha-muted);
@@ -354,18 +339,6 @@ label.field {
   border-right: 0;
 }
 
-.cell.comfort {
-  background: var(--ctha-comfort);
-}
-
-.cell.eco {
-  background: var(--ctha-eco);
-}
-
-.cell.antifreeze {
-  background: var(--ctha-antifreeze);
-}
-
 .cell.inherit {
   background: var(--ctha-inherit);
 }
@@ -453,6 +426,31 @@ tr:last-child td {
   flex-direction: column;
   gap: 4px;
   min-width: 220px;
+}
+
+/* Uno scenario porta con sé la tabella delle sue zone: l'elenco diventa una
+   colonna, con intestazione e tabella una sotto l'altra. */
+.item.column {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.item-head {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+input[type="color"] {
+  width: 34px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--ctha-divider);
+  border-radius: 6px;
+  background: var(--ctha-card);
+  cursor: pointer;
 }
 
 .item-actions {

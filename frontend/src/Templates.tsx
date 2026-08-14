@@ -12,8 +12,10 @@ import {
   freeId,
   levelAt,
   listDays,
+  ownSetpointCount,
   slugify,
-  sortedTemplates,
+  sortedDayTemplates,
+  sortedWeekTemplates,
   weekTemplateUsages,
 } from "./model";
 import type { Program, Run } from "./types";
@@ -70,13 +72,27 @@ export function Templates({ program, run }: { program: Program; run: Run }) {
         }
       >
         <div className="list">
-          {sortedTemplates(program).map((template) => {
+          {sortedDayTemplates(program).map((template) => {
             const usages = dayTemplateUsages(program, template.id);
             const used = usages.length > 0;
+            const own = ownSetpointCount(template.setpoints);
             return (
               <div className="item" key={template.id}>
                 <div className="item-main">
-                  <strong>{template.name}</strong>
+                  <strong>
+                    {template.name}
+                    {own > 0 && (
+                      <>
+                        {" "}
+                        <span
+                          className="badge"
+                          title="Sovrascrive le temperature di chi la usa"
+                        >
+                          {own} temperature proprie
+                        </span>
+                      </>
+                    )}
+                  </strong>
                   <span className="hint">
                     {used
                       ? usages
@@ -87,7 +103,7 @@ export function Templates({ program, run }: { program: Program; run: Run }) {
                           .join("; ")
                       : "non usata da nessuna settimana tipo"}
                   </span>
-                  <SlotsPreview slots={template.slots} />
+                  <SlotsPreview program={program} slots={template.slots} />
                 </div>
                 <div className="item-actions">
                   <button
@@ -142,7 +158,7 @@ export function Templates({ program, run }: { program: Program; run: Run }) {
 
       <Card
         title="Settimane tipo"
-        hint="Una settimana tipo assegna una giornata a ciascun giorno. Gli scenari e le singole zone la seguono per riferimento."
+        hint="Una settimana tipo assegna una giornata a ciascun giorno. Sono gli scenari a darla alle zone."
         actions={
           <button className="btn" onClick={() => setPrompt({ kind: "new-week" })}>
             + Nuova
@@ -150,24 +166,36 @@ export function Templates({ program, run }: { program: Program; run: Run }) {
         }
       >
         <div className="list">
-          {Object.values(program.week_templates).map((template) => {
+          {sortedWeekTemplates(program).map((template) => {
             const usages = weekTemplateUsages(program, template.id);
             const used = usages.length > 0;
+            const own = ownSetpointCount(template.setpoints);
             return (
               <div className="item" key={template.id}>
                 <div className="item-main">
-                  <strong>{template.name}</strong>
+                  <strong>
+                    {template.name}
+                    {own > 0 && (
+                      <>
+                        {" "}
+                        <span
+                          className="badge"
+                          title="Sovrascrive le temperature delle zone che la seguono"
+                        >
+                          {own} temperature proprie
+                        </span>
+                      </>
+                    )}
+                  </strong>
                   <span className="hint">
                     {used
                       ? usages
                           .map(
                             (usage) =>
-                              `${
-                                usage.kind === "scenario" ? "scenario" : "zona"
-                              } «${usage.name}»`,
+                              `${usage.zones.join(", ")} in «${usage.scenarioName}»`,
                           )
                           .join("; ")
-                      : "non seguita da nessuno scenario né zona"}
+                      : "nessuno scenario la assegna a una zona"}
                   </span>
                 </div>
                 <div className="item-actions">
@@ -188,7 +216,7 @@ export function Templates({ program, run }: { program: Program; run: Run }) {
                     disabled={used}
                     title={
                       used
-                        ? "Prima vanno spostati gli scenari e le zone che la seguono"
+                        ? "Prima vanno spostate le zone degli scenari che la assegnano"
                         : undefined
                     }
                     onClick={() =>
@@ -224,12 +252,19 @@ export function Templates({ program, run }: { program: Program; run: Run }) {
   );
 }
 
-function SlotsPreview({ slots }: { slots: string }) {
+function SlotsPreview({ program, slots }: { program: Program; slots: string }) {
   return (
     <div className="preview" aria-hidden="true">
-      {Array.from({ length: SLOTS_PER_DAY }, (_, slot) => (
-        <div key={slot} className={`cell ${levelAt(slots, slot) ?? "inherit"}`} />
-      ))}
+      {Array.from({ length: SLOTS_PER_DAY }, (_, slot) => {
+        const level = levelAt(program, slots, slot);
+        return (
+          <div
+            key={slot}
+            className={level ? "cell" : "cell inherit"}
+            style={level ? { background: level.color } : undefined}
+          />
+        );
+      })}
     </div>
   );
 }

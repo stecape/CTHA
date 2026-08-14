@@ -36,6 +36,74 @@ clear_override:
       selector:
         text:
 
+set_level:
+  fields:
+    level:
+      required: true
+      example: alta
+      selector:
+        text:
+    name:
+      example: Alta
+      selector:
+        text:
+    color:
+      example: "#e0703c"
+      selector:
+        text:
+    char:
+      example: a
+      selector:
+        text:
+    temperature:
+      example: 21
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 0.5
+          unit_of_measurement: "°C"
+
+delete_level:
+  fields:
+    level:
+      required: true
+      example: media
+      selector:
+        text:
+
+set_setpoint:
+  fields:
+    level:
+      required: true
+      example: alta
+      selector:
+        text:
+    temperature:
+      example: 21.5
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 0.5
+          unit_of_measurement: "°C"
+    scenario_id:
+      example: vacanza
+      selector:
+        text:
+    zone_id:
+      example: 01J8ZQ4P7K3W2X9Y
+      selector:
+        text:
+    week_template:
+      example: inverno
+      selector:
+        text:
+    day_template:
+      example: feriale
+      selector:
+        text:
+
 set_day_template:
   fields:
     template_id:
@@ -48,7 +116,7 @@ set_day_template:
       selector:
         text:
     slots:
-      example: "eeeeeeeeeeeecccccccccccccccccccccccccccccccccccc"
+      example: "bbbbbbbbbbbbaaaaammmmmmmmmmmmmmmmmaaaaaaaaaaabbb"
       selector:
         text:
 
@@ -75,13 +143,9 @@ paint_slots:
           max: 47
           mode: box
     level:
-      example: comfort
+      example: alta
       selector:
-        select:
-          options:
-            - comfort
-            - eco
-            - antifreeze
+        text:
 
 duplicate_day_template:
   fields:
@@ -150,20 +214,8 @@ set_scenario:
       example: Vacanza
       selector:
         text:
-    week_template:
-      example: inverno
-      selector:
-        text:
-    offset:
-      example: -3
-      selector:
-        number:
-          min: -10
-          max: 10
-          step: 0.5
-          unit_of_measurement: "°C"
-    zone_offsets:
-      example: "{01J8ZQ4P7K3W2X9Y: 1.5}"
+    zones:
+      example: "{01J8ZQ4P7K3W2X9Y: inverno}"
       selector:
         object:
 
@@ -183,30 +235,6 @@ activate_scenario:
       selector:
         text:
 
-set_setpoint:
-  fields:
-    level:
-      required: true
-      example: comfort
-      selector:
-        select:
-          options:
-            - comfort
-            - eco
-            - antifreeze
-    temperature:
-      example: 21.5
-      selector:
-        number:
-          min: 5
-          max: 30
-          step: 0.5
-          unit_of_measurement: "°C"
-    zone_id:
-      example: 01J8ZQ4P7K3W2X9Y
-      selector:
-        text:
-
 set_zone_week_template:
   fields:
     zone_id:
@@ -216,5 +244,9 @@ set_zone_week_template:
         text:
     template_id:
       example: inverno
+      selector:
+        text:
+    scenario_id:
+      example: vacanza
       selector:
         text:

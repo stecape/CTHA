@@ -1,13 +1,15 @@
 // Cosa sta succedendo adesso, zona per zona.
 //
 // La riga che conta è "target": dice se la zona sta seguendo il programma o un
-// override, e da dove esce il numero. Un setpoint che non si sa da dove viene
-// è la cosa che rende impossibile fidarsi di un cronotermostato.
+// override, e da quale livello della gerarchia esce il numero. Un setpoint che
+// non si sa da dove viene è la cosa che rende impossibile fidarsi di un
+// cronotermostato — e con cinque livelli di ereditarietà lo diventerebbe in
+// fretta, se non fosse scritto.
 
 import { useState } from "react";
 
 import { api } from "./api";
-import { LEVEL_LABEL, formatTemp, weekTemplateForZone } from "./model";
+import { LAYER_LABEL, formatTemp, sortedWeekTemplates } from "./model";
 import type { HomeAssistant, Override, Policy, Run, Snapshot } from "./types";
 import { Card, NumberField } from "./ui";
 
@@ -16,12 +18,6 @@ const POLICY_LABEL: Record<Policy, string> = {
   duration: "un'ora",
   until_scenario_change: "cambio scenario",
   sticky: "finché non lo tolgo",
-};
-
-const SOURCE_LABEL: Record<string, string> = {
-  zone: "valore della zona",
-  global: "ereditato dal globale",
-  none: "nessun livello attivo",
 };
 
 const OVERRIDE_SOURCE_LABEL: Record<string, string> = {
@@ -41,6 +37,8 @@ export function ZonesTab({
 }) {
   const { program, runtime, meta } = snapshot;
   const zones = Object.values(program.zones);
+  const scenario = program.scenarios[program.active_scenario];
+  const weeks = sortedWeekTemplates(program);
 
   if (zones.length === 0) {
     return (
@@ -55,7 +53,7 @@ export function ZonesTab({
   return (
     <Card
       title="Zone"
-      hint="Temperatura misurata, setpoint applicato e sua provenienza. Un override scavalca il programma finché non scade."
+      hint="Temperatura misurata, setpoint applicato e da quale livello della gerarchia arriva. Un override scavalca il programma finché non scade."
     >
       <div className="zones">
         {zones.map((zone) => {
@@ -64,6 +62,7 @@ export function ZonesTab({
             ? hass.states[state.entity_id]
             : undefined;
           const current = entity?.attributes["current_temperature"];
+          const level = state?.level ? program.levels[state.level] : undefined;
 
           return (
             <div className="zone" key={zone.id}>
@@ -82,33 +81,39 @@ export function ZonesTab({
                 <div className="row">
                   <span className="k">Livello</span>
                   <span>
-                    {state?.level ? LEVEL_LABEL[state.level] : "—"}
-                    {state?.source && state.source !== "none" && (
-                      <>
-                        {" "}
-                        <span className="badge plain">
-                          {SOURCE_LABEL[state.source] ?? state.source}
-                        </span>
-                      </>
+                    {level ? (
+                      <span className="cell-stack">
+                        <span
+                          className="swatch"
+                          style={{ background: level.color }}
+                        />
+                        {level.name}
+                      </span>
+                    ) : (
+                      "—"
                     )}
                   </span>
                 </div>
-                {state?.offset !== 0 && state?.offset !== undefined && (
+                {state?.source && state.source !== "none" && (
                   <div className="row">
-                    <span className="k">Offset scenario</span>
-                    <span>{state.offset.toFixed(1)} °C</span>
+                    <span className="k">Temperatura da</span>
+                    <span className="badge plain">
+                      {LAYER_LABEL[state.source]}
+                    </span>
                   </div>
                 )}
                 <div className="row">
                   <span className="k">Programma</span>
                   <span>
-                    {program.week_templates[
-                      weekTemplateForZone(program, zone) ?? ""
-                    ]?.name ?? "—"}
-                    {zone.week_template && (
+                    {state?.week_template
+                      ? (program.week_templates[state.week_template]?.name ??
+                        state.week_template)
+                      : "non programmata"}
+                    {state?.day_template && (
                       <>
-                        {" "}
-                        <span className="badge">solo questa zona</span>
+                        {" · oggi "}
+                        {program.day_templates[state.day_template]?.name ??
+                          state.day_template}
                       </>
                     )}
                   </span>
@@ -137,9 +142,9 @@ export function ZonesTab({
               )}
 
               <label className="field">
-                Settimana tipo della zona
+                Settimana tipo in «{scenario?.name ?? program.active_scenario}»
                 <select
-                  value={zone.week_template ?? ""}
+                  value={scenario?.zones[zone.id] ?? ""}
                   onChange={(event) =>
                     void run((hass) =>
                       api.setZoneWeekTemplate(
@@ -150,8 +155,8 @@ export function ZonesTab({
                     )
                   }
                 >
-                  <option value="">segue lo scenario</option>
-                  {Object.values(program.week_templates).map((template) => (
+                  <option value="">— non programmata —</option>
+                  {weeks.map((template) => (
                     <option key={template.id} value={template.id}>
                       {template.name}
                     </option>

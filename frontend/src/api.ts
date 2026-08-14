@@ -4,7 +4,7 @@
 // referenziale: il pannello li chiama invece di avere comandi websocket
 // propri, così la logica di scrittura resta in un posto solo.
 
-import type { HomeAssistant, Level, Policy, Snapshot } from "./types";
+import type { HomeAssistant, LevelId, Policy, Scope, Snapshot } from "./types";
 
 const DOMAIN = "ctha";
 
@@ -38,6 +38,22 @@ function call(
   return hass.callService(DOMAIN, service, payload);
 }
 
+/** Il punto della gerarchia, tradotto negli argomenti che il servizio si aspetta. */
+function scopeFields(scope: Scope): Record<string, string | undefined> {
+  switch (scope.layer) {
+    case "scenario":
+      return { scenario_id: scope.id };
+    case "zone":
+      return { zone_id: scope.id };
+    case "week_template":
+      return { week_template: scope.id };
+    case "day_template":
+      return { day_template: scope.id };
+    default:
+      return {};
+  }
+}
+
 export const api = {
   setOverride(
     hass: HomeAssistant,
@@ -58,6 +74,33 @@ export const api = {
     return call(hass, "clear_override", { zone_id: zoneId });
   },
 
+  setLevel(
+    hass: HomeAssistant,
+    levelId: LevelId,
+    fields: { name?: string; color?: string; char?: string; temperature?: number },
+  ) {
+    return call(hass, "set_level", { level: levelId, ...fields });
+  },
+
+  deleteLevel(hass: HomeAssistant, levelId: LevelId) {
+    return call(hass, "delete_level", { level: levelId });
+  },
+
+  /** Scrive un setpoint in un punto della gerarchia; `null` torna a ereditare. */
+  setSetpoint(
+    hass: HomeAssistant,
+    scope: Scope,
+    levelId: LevelId,
+    temperature: number | null,
+  ) {
+    return call(hass, "set_setpoint", {
+      level: levelId,
+      // null è esplicito: significa "torna a ereditare da chi sta sopra".
+      temperature,
+      ...scopeFields(scope),
+    });
+  },
+
   setDayTemplate(
     hass: HomeAssistant,
     templateId: string,
@@ -74,14 +117,14 @@ export const api = {
     templateId: string,
     start: number,
     end: number,
-    level: Level | null,
+    levelId: LevelId | null,
   ) {
     return call(hass, "paint_slots", {
       template_id: templateId,
       start_slot: start,
       end_slot: end,
       // Livello assente = "torna a ereditare": è la semantica dello schema.
-      level: level ?? undefined,
+      level: levelId ?? undefined,
     });
   },
 
@@ -132,12 +175,7 @@ export const api = {
   setScenario(
     hass: HomeAssistant,
     scenarioId: string,
-    fields: {
-      name?: string;
-      week_template?: string;
-      offset?: number;
-      zone_offsets?: Record<string, number | null>;
-    },
+    fields: { name?: string; zones?: Record<string, string | null> },
   ) {
     return call(hass, "set_scenario", { scenario_id: scenarioId, ...fields });
   },
@@ -150,28 +188,17 @@ export const api = {
     return call(hass, "activate_scenario", { scenario_id: scenarioId });
   },
 
-  setSetpoint(
-    hass: HomeAssistant,
-    level: Level,
-    temperature: number | null,
-    zoneId?: string,
-  ) {
-    return call(hass, "set_setpoint", {
-      level,
-      // null è esplicito: sulla zona significa "torna a ereditare".
-      temperature,
-      zone_id: zoneId,
-    });
-  },
-
+  /** Assegna la settimana tipo di una zona dentro uno scenario. */
   setZoneWeekTemplate(
     hass: HomeAssistant,
     zoneId: string,
     templateId: string | null,
+    scenarioId?: string,
   ) {
     return call(hass, "set_zone_week_template", {
       zone_id: zoneId,
       template_id: templateId,
+      scenario_id: scenarioId,
     });
   },
 };
