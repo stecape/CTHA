@@ -304,6 +304,14 @@ label.field {
   border-color: var(--ctha-divider);
 }
 
+/* Una zona che CTHA non riesce a leggere non sta nemmeno seguendo il
+   programma: va vista, non nascosta dietro a un trattino. */
+.badge.warn {
+  background: color-mix(in srgb, var(--ctha-error) 12%, transparent);
+  color: var(--ctha-error);
+  border-color: color-mix(in srgb, var(--ctha-error) 40%, transparent);
+}
+
 /* Un pulsante «Temperature» che porta un conteggio: il badge dice quante ne
    sono state scritte su quell'elemento, e distingue a colpo d'occhio chi
    sovrascrive da chi eredita tutto. */

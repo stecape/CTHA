@@ -104,7 +104,13 @@ class CthaCoordinator(DataUpdateCoordinator[CthaData]):
 
         @callback
         def _unregister() -> None:
-            self._writers.pop(zone_id, None)
+            # Solo se la registrazione è ancora la nostra: su un reload la
+            # nuova entità si registra *prima* che la vecchia venga smontata, e
+            # rimuovere alla cieca cancellerebbe quella buona appena inserita.
+            # La zona resterebbe senza writer, cioè senza più ricevere setpoint,
+            # e in silenzio — nessun errore, solo una zona che non cambia mai.
+            if self._writers.get(zone_id) is writer:
+                del self._writers[zone_id]
 
         return _unregister
 
@@ -120,7 +126,9 @@ class CthaCoordinator(DataUpdateCoordinator[CthaData]):
 
         @callback
         def _unregister() -> None:
-            self.entity_ids.pop(zone_id, None)
+            # Stessa cautela del writer: si toglie solo la propria.
+            if self.entity_ids.get(zone_id) == entity_id:
+                del self.entity_ids[zone_id]
 
         return _unregister
 

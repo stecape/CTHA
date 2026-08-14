@@ -11,7 +11,14 @@ import { useState } from "react";
 import { api } from "./api";
 import { LAYER_LABEL, formatTemp, sortedWeekTemplates } from "./model";
 import { SetpointsButton } from "./Setpoints";
-import type { HomeAssistant, Override, Policy, Run, Snapshot } from "./types";
+import type {
+  HassEntity,
+  HomeAssistant,
+  Override,
+  Policy,
+  Run,
+  Snapshot,
+} from "./types";
 import { Card, NumberField } from "./ui";
 
 const POLICY_LABEL: Record<Policy, string> = {
@@ -70,9 +77,11 @@ export function ZonesTab({
             <div className="zone" key={zone.id}>
               <div className="zone-head">
                 <strong>{zone.name}</strong>
-                <span className="reading">
-                  {typeof current === "number" ? formatTemp(current) : "—"}
-                </span>
+                {typeof current === "number" ? (
+                  <span className="reading">{formatTemp(current)}</span>
+                ) : (
+                  <Unreachable entityId={state?.entity_id ?? null} entity={entity} />
+                )}
               </div>
 
               <div className="rows">
@@ -180,6 +189,48 @@ export function ZonesTab({
         })}
       </div>
     </Card>
+  );
+}
+
+/**
+ * Perché una zona non mostra la temperatura.
+ *
+ * Un trattino muto qui costa caro: la stessa condizione che impedisce a CTHA di
+ * *leggere* il termostato gli impedisce anche di *scriverci*, quindi quella
+ * zona non sta seguendo il programma e nessuno lo direbbe. Meglio nominare
+ * l'entità da guardare.
+ */
+function Unreachable({
+  entityId,
+  entity,
+}: {
+  entityId: string | null;
+  entity: HassEntity | undefined;
+}) {
+  if (!entityId) {
+    return (
+      <span
+        className="badge warn"
+        title="CTHA non ha ancora registrato l'entità di questa zona: prova a riavviare Home Assistant"
+      >
+        non registrata
+      </span>
+    );
+  }
+  if (!entity || entity.state === "unavailable" || entity.state === "unknown") {
+    return (
+      <span
+        className="badge warn"
+        title={`${entityId} non è disponibile: CTHA non riesce a leggere né a scrivere il termostato di questa zona, che quindi non sta seguendo il programma`}
+      >
+        non disponibile
+      </span>
+    );
+  }
+  return (
+    <span className="badge warn" title={`${entityId} non riporta la temperatura misurata`}>
+      senza misura
+    </span>
   );
 }
 
