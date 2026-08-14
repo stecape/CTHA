@@ -195,6 +195,7 @@ copia indipendente.
 |---|---|
 | `ctha.set_override` | forza una temperatura su una zona |
 | `ctha.clear_override` | riporta la zona al programma |
+| `ctha.apply` | riscrive subito i setpoint, senza aspettare il watchdog |
 | `ctha.set_level` | crea o aggiorna un livello di temperatura |
 | `ctha.delete_level` | elimina un livello non più dipinto |
 | `ctha.set_setpoint` | scrive una temperatura in un punto della gerarchia |

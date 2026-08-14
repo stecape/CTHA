@@ -74,6 +74,11 @@ export const api = {
     return call(hass, "clear_override", { zone_id: zoneId });
   },
 
+  /** Riscrive subito il setpoint; senza zona, tutte. */
+  apply(hass: HomeAssistant, zoneId?: string) {
+    return call(hass, "apply", { zone_id: zoneId });
+  },
+
   setLevel(
     hass: HomeAssistant,
     levelId: LevelId,

@@ -37,6 +37,13 @@ clear_override:
       selector:
         text:
 
+apply:
+  fields:
+    zone_id:
+      example: 01J8ZQ4P7K3W2X9Y
+      selector:
+        text:
+
 set_level:
   fields:
     level:

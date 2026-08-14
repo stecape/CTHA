@@ -77,7 +77,14 @@ export function ZonesTab({
             <div className="zone" key={zone.id}>
               <div className="zone-head">
                 <strong>{zone.name}</strong>
-                {typeof current === "number" ? (
+                {entity?.state === "off" ? (
+                  <span
+                    className="badge warn"
+                    title="Zona spenta: CTHA non le scrive il setpoint, riaccenderla non l'ha chiesto nessuno"
+                  >
+                    spenta
+                  </span>
+                ) : typeof current === "number" ? (
                   <span className="reading">{formatTemp(current)}</span>
                 ) : (
                   <Unreachable entityId={state?.entity_id ?? null} entity={entity} />
@@ -160,6 +167,13 @@ export function ZonesTab({
                   name={`zona «${zone.name}»`}
                   run={run}
                 />
+                <button
+                  className="btn small"
+                  title="Riscrive subito il setpoint sul termostato, senza aspettare il watchdog"
+                  onClick={() => void run((hass) => api.apply(hass, zone.id))}
+                >
+                  Riscrivi
+                </button>
               </div>
 
               <label className="field">

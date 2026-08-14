@@ -59,6 +59,7 @@ from .const import (
     OVERRIDE_POLICIES,
     POLICY_NEXT_SLOT,
     SERVICE_ACTIVATE_SCENARIO,
+    SERVICE_APPLY,
     SERVICE_CLEAR_OVERRIDE,
     SERVICE_DELETE_DAY_TEMPLATE,
     SERVICE_DELETE_LEVEL,
@@ -91,6 +92,9 @@ SET_OVERRIDE_SCHEMA = vol.Schema(
 )
 
 CLEAR_OVERRIDE_SCHEMA = vol.Schema({vol.Required(ATTR_ZONE_ID): cv.string})
+
+# Senza zona si riscrivono tutte, scaglionate come fa il watchdog.
+APPLY_SCHEMA = vol.Schema({vol.Optional(ATTR_ZONE_ID): cv.string})
 
 SET_LEVEL_SCHEMA = vol.Schema(
     {
@@ -205,6 +209,14 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def _async_clear_override(call: ServiceCall) -> None:
         """Rimuove l'override dalla zona indicata."""
         await _coordinator(hass).async_clear_override(call.data[ATTR_ZONE_ID])
+
+    async def _async_apply(call: ServiceCall) -> None:
+        """Riscrive subito il setpoint, senza aspettare il watchdog."""
+        coordinator = _coordinator(hass)
+        if (zone_id := call.data.get(ATTR_ZONE_ID)) is not None:
+            await coordinator.async_apply_zone(zone_id)
+        else:
+            await coordinator.async_apply_all()
 
     # --- Livelli di temperatura ---------------------------------------------
 
@@ -361,6 +373,7 @@ def async_register_services(hass: HomeAssistant) -> None:
     _register(
         hass, SERVICE_CLEAR_OVERRIDE, _async_clear_override, CLEAR_OVERRIDE_SCHEMA
     )
+    _register(hass, SERVICE_APPLY, _async_apply, APPLY_SCHEMA)
     _register(hass, SERVICE_SET_LEVEL, _async_set_level, SET_LEVEL_SCHEMA)
     _register(hass, SERVICE_DELETE_LEVEL, _async_delete_level, DELETE_LEVEL_SCHEMA)
     _register(hass, SERVICE_SET_SETPOINT, _async_set_setpoint, SET_SETPOINT_SCHEMA)
@@ -417,6 +430,7 @@ def async_unregister_services(hass: HomeAssistant) -> None:
     for service in (
         SERVICE_SET_OVERRIDE,
         SERVICE_CLEAR_OVERRIDE,
+        SERVICE_APPLY,
         SERVICE_SET_LEVEL,
         SERVICE_DELETE_LEVEL,
         SERVICE_SET_SETPOINT,

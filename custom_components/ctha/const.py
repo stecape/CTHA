@@ -152,6 +152,10 @@ TEMP_STEP: Final = 0.5
 SERVICE_SET_OVERRIDE: Final = "set_override"
 SERVICE_CLEAR_OVERRIDE: Final = "clear_override"
 
+# Riscrittura a richiesta: il watchdog passa ogni RECONCILE_INTERVAL, e quando
+# si sta guardando una zona rimasta indietro dodici minuti sono lunghi.
+SERVICE_APPLY: Final = "apply"
+
 SERVICE_SET_DAY_TEMPLATE: Final = "set_day_template"
 SERVICE_PAINT_SLOTS: Final = "paint_slots"
 SERVICE_DUPLICATE_DAY_TEMPLATE: Final = "duplicate_day_template"

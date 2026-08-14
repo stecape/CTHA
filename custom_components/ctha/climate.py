@@ -320,7 +320,17 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
 
             if self.hvac_mode == HVACMode.OFF:
                 # Una zona spenta a mano resta spenta: scriverle un setpoint la
-                # riaccenderebbe, e nessuno l'ha chiesto.
+                # riaccenderebbe, e nessuno l'ha chiesto. Vale anche per una
+                # zona irraggiungibile, che da qui è indistinguibile da una
+                # spenta — e questo va detto, perché una zona saltata in
+                # silenzio resta indietro senza che nessuno se ne accorga.
+                _LOGGER.debug(
+                    "Nessuna scrittura su %s: %s",
+                    self._target_entity_id,
+                    "termostato non disponibile"
+                    if self._target_state is None
+                    else "zona spenta",
+                )
                 self.async_write_ha_state()
                 return
 

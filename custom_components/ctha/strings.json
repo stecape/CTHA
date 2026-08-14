@@ -47,6 +47,16 @@
         }
       }
     },
+    "apply": {
+      "name": "Riscrivi i setpoint",
+      "description": "Riporta subito le zone al setpoint che devono avere, senza aspettare il watchdog. Serve dopo che una zona è tornata raggiungibile, o per vedere l'effetto di una modifica senza attendere.",
+      "fields": {
+        "zone_id": {
+          "name": "Zona",
+          "description": "Zona da riscrivere. Se omessa si riscrivono tutte, scaglionate per non saturare il bus."
+        }
+      }
+    },
     "set_level": {
       "name": "Imposta livello di temperatura",
       "description": "Crea un livello di temperatura o ne aggiorna nome, colore e setpoint globale. I livelli sono liberi: alta, media, bassa e antigelo sono solo quelli iniziali.",

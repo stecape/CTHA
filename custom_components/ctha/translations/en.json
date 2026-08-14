@@ -47,6 +47,16 @@
         }
       }
     },
+    "apply": {
+      "name": "Rewrite setpoints",
+      "description": "Put the zones back on the setpoint they should hold, right away, without waiting for the watchdog. Useful after a zone becomes reachable again, or to see the effect of a change without waiting.",
+      "fields": {
+        "zone_id": {
+          "name": "Zone",
+          "description": "Zone to rewrite. If omitted every zone is rewritten, staggered so as not to saturate the bus."
+        }
+      }
+    },
     "set_level": {
       "name": "Set temperature level",
       "description": "Create a temperature level or update its name, colour and global setpoint. Levels are open-ended: high, medium, low and antifreeze are only the initial ones.",
