@@ -407,7 +407,16 @@ progressive. Stato attuale di ciascun pezzo:
 - Mettere la 3550 in Manuale su tutte le zone e verificare col log di debug che
   le riasserzioni simultanee su più zone spariscano. È la firma che distingue la
   centrale dalla manopola: la manopola muove una zona, la centrale ne muove
-  molte nello stesso istante
+  molte nello stesso istante. Se funziona, è la soluzione a costo zero: senza
+  cambi di setpoint dalla centrale, ciò che scrive CTHA non scade
+- Valutare la riconfigurazione delle sonde come **termostato hotel** (`TYPE`
+  sulla sonda): in quella modalità la sonda regola da sé i propri attuatori, non
+  esiste centrale che riasserisca, e il comando da remoto resta — è la forma che
+  servirebbe a CTHA. Da chiarire prima: i valori di `TYPE` (non sono nel manuale
+  installatore, rimanda alla scheda tecnica), la riconfigurazione degli
+  attuatori, e soprattutto se l'integrazione MyHOME continui a esporre la zona
+  allo stesso modo. Da provare **su una sola zona**. Attenzione: la modalità
+  *residenziale* invece perde il comando da remoto, quindi non va bene
 - Probabile necessità di fare un fork personale dell'integrazione MyHOME,
   poiché il progetto upstream è di fatto non mantenuto dall'inizio del 2024
 - Test con `pytest-homeassistant-custom-component` per la parte che tocca HA:
@@ -441,6 +450,21 @@ progressive. Stato attuale di ciascun pezzo:
   fonte primaria di conflitti e va neutralizzata attivamente. Neutralizzare il
   programma, però, non vuol dire neutralizzare la centrale: quella regola, e
   serve.
+- **Finché la sonda è configurata come «sonda MyHOME», il setpoint scritto da
+  CTHA è provvisorio per progetto.** Il manuale installatore della H/LN4691
+  (§3.1) dice che un'impostazione diversa da quella della centrale «è temporanea
+  e rimarrà valida sino al prossimo cambio di set point da parte della
+  centrale». È un comportamento *della sonda*, non della centrale: nessuna
+  quantità di riscritture lo cambia. Ne discende che il watchdog non può vincere
+  la partita, può solo tenere il campo fra un cambio e l'altro — e che l'unico
+  modo di vincerla è che quel «prossimo cambio» non arrivi mai.
+- Sempre dal manuale della sonda: in modalità comfort, eco e antigelo «non sarà
+  possibile cambiare modalità da centrale o altri dispositivo di controllo».
+  Blocca la centrale, ma anche CTHA: non è una strada, è un blocco d'emergenza.
+- Le funzioni locali della sonda (cambio modalità, comfort/eco/antigelo,
+  ventola) **si possono disabilitare in configurazione** con MyHOME_Suite, e da
+  lì «la pressione del pulsante non avrà nessun effetto». È una via alternativa
+  al problema della manopola: invece di leggerne l'offset, la si spegne.
 - Gli offset della manopola della sonda sono una questione a livello hardware:
   nessun comando software può annullarli, solo compensarli o visualizzarli.
 - Il rilevamento echo e la tolleranza deadband (0.15 °C) sono necessari per
