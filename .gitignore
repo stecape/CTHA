@@ -34,3 +34,6 @@ config/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Segreti locali
+.env

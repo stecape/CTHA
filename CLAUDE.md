@@ -84,6 +84,9 @@ frontend/                # sorgenti del pannello: Vite + React + TypeScript
 tests/                   # suite pytest sul nucleo puro (conftest.py + un file per modulo)
 pytest.ini               # testpaths = tests
 requirements_test.txt    # solo pytest: la suite non ha bisogno di HA
+diagnostics/             # strumenti standalone, indipendenti da HA (vedi diagnostics/README.md)
+requirements_diagnostics.txt  # dipendenze dei soli strumenti diagnostici
+todo.md                  # checklist operativa degli step immediati in corso
 hacs.json                # metadati per la distribuzione via HACS
 README.md                # documentazione utente (installazione, config, roadmap)
 ```
@@ -408,6 +411,11 @@ progressive. Stato attuale di ciascun pezzo:
   `external`.
 
 ## Prossimi passi
+
+**Step immediato in corso, con checklist operativa: vedi `todo.md`** (diagnosi
+del rimbalzo di setpoint tramite `diagnostics/own_bus_trace.py`, uno script
+standalone che ascolta il bus OpenWebNet — va eseguito su una macchina con
+accesso alla LAN del gateway, non in un ambiente cloud).
 
 - Lettura dei messaggi di offset locale della sonda 4691, per distinguere la
   manopola fisica dalle altre sorgenti esterne. È l'ultimo pezzo che richiede di

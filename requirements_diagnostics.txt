@@ -1,0 +1,4 @@
+# Dipendenze per lo script diagnostico in diagnostics/own_bus_trace.py.
+# Nessuna dipendenza da Home Assistant: solo il client OWNd, la stessa
+# libreria (e versione) usata in produzione dall'integrazione MyHOME.
+OWNd==0.7.48
