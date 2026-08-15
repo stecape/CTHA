@@ -143,6 +143,27 @@ class OverrideManager:
         """Override attualmente registrato per la zona, se presente."""
         return self._data.overrides.get(zone_id)
 
+    def active(self, zone_id: str, now: datetime) -> Override | None:
+        """Override della zona, ma solo se non ha già esaurito la validità.
+
+        `get` dice cos'è registrato, questo dice cos'è ancora valido, e la
+        differenza conta: la scadenza si consuma soltanto quando passa
+        `purge_expired`, che è un timer. Fra un passaggio e l'altro un override
+        decaduto resterebbe autoritativo, e chi legge il setpoint otterrebbe un
+        valore che il programma ha già smesso di volere.
+        """
+        override = self._data.overrides.get(zone_id)
+        if override is None:
+            return None
+        if is_expired(
+            override,
+            now,
+            self._data.active_scenario,
+            resolve_level(self._data, zone_id, now),
+        ):
+            return None
+        return override
+
     def purge_expired(self, now: datetime) -> list[str]:
         """Elimina gli override scaduti, restituendo le zone interessate.
 

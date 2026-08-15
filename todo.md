@@ -1,50 +1,58 @@
-# TODO — da fare al PC con accesso alla LAN
+# TODO
 
-Elenco degli step immediati, pensato per essere ripreso da una sessione con
-accesso diretto alla rete di casa (es. Copernico), dove questo ambiente cloud
-non arriva.
+## 1. Diagnosi del rimbalzo di setpoint — chiusa il 15 agosto 2026
 
-## 1. Diagnosi del rimbalzo di setpoint (in corso)
+La checklist di questa sezione è stata eseguita per intero su Copernico, con
+accesso diretto alla LAN del gateway. **L'esito ha smentito l'ipotesi di
+partenza**, quindi vale la pena tenerne il verbale invece di cancellarlo.
 
-Contesto completo: `CLAUDE.md` → «Apprendimenti e principi chiave» (il
-comportamento della sonda 4691, §3.1 del manuale) e «Prossimi passi».
+Sintomo: una zona portata a 17 °C al cambio di fascia veniva riportata a 18 °C
+pochi minuti dopo, fino al confine di slot successivo. L'ipotesi era che a
+riasserire fosse il programma settimanale della centrale 3550.
 
-Sintomo osservato: una zona corretta da CTHA a 17 °C al cambio di fascia
-(22:00) viene riportata a 18 °C con un ciclo di ~4 minuti, finché CTHA non la
-ricorregge al successivo confine di slot o al giro del watchdog. Non succede
-mentre è attivo un override manuale (in quella finestra CTHA non deve
-riscrivere nulla, quindi non c'è competizione visibile).
+- [x] Dipendenze diagnostiche installate (`requirements_diagnostics.txt`)
+- [x] `diagnostics/.env` compilato — il gateway è `192.168.2.35:20000`
+- [x] Trace eseguita dalle 22:02 alle 23:33 del 15 agosto 2026
+- [x] Entità MyHOME controllate durante la trace: nessuna interruzione, la
+      seconda sessione EVENTO convive con quella di Home Assistant
+- [x] Log analizzato
 
-- [ ] Installare le dipendenze diagnostiche: `pip install -r
-      requirements_diagnostics.txt` (dalla root del repo)
-- [ ] Compilare `diagnostics/.env` a partire da `diagnostics/.env.example`
-      (host, porta, password del gateway — gli stessi valori già usati da
-      MyHOME)
-- [ ] Lanciare `python diagnostics/own_bus_trace.py` per una finestra che
-      copra l'orario del problema (almeno da poco prima delle 22:00 a dopo le
-      23:00)
-- [ ] Durante la trace, controllare in Home Assistant che le entità MyHOME
-      continuino ad aggiornarsi normalmente (rischio noto e non verificabile
-      da remoto: una seconda sessione evento concorrente potrebbe non essere
-      supportata da tutti i firmware del gateway — vedi
-      `diagnostics/README.md`)
-- [ ] Analizzare il log: isolare i frame della zona interessata
-      (`grep -P '^\S+\t\*4\*' diagnostics/own_bus_trace_*.log`) e verificare
-      se il rimbalzo a 18 °C coincide con una scrittura che tocca **una sola
-      zona** (manopola/sonda) o **più zone nello stesso istante** (firma della
-      centrale 3550 che riafferma il proprio programma)
-- [ ] In base all'esito, decidere il passo successivo — vedi CLAUDE.md →
-      «Prossimi passi»:
-      - se è la 3550: mettere la centrale in **Manuale** su tutte le zone e
-        riverificare che il rimbalzo sparisca (soluzione a costo zero, non
-        tocca il codice)
-      - se è la sonda/manopola: è un offset hardware, si può solo mostrare o
-        compensare in UI — nessun rimedio via bus
+**Risultato: non era la 3550. Era CTHA.** In un'ora e mezza di bus la centrale
+non ha scritto un solo setpoint; tutti i venti frame registrati erano di CTHA o
+dell'utente. La firma che lo prova è la periodicità di **12 minuti esatti**
+(`RECONCILE_INTERVAL`) con fase costante al centesimo di secondo, e la
+spaziatura di **3,0 s** fra zone (`WRITE_STAGGER_SECONDS` +
+`WRITE_VERIFY_SECONDS`).
 
-## 2. Voci più a lungo termine
+Causa: `_async_reconcile` gira su `async_track_time_interval`, che consegna
+**UTC**, mentre `_async_slot_tick` gira su `async_track_time_change`, che
+consegna l'**ora locale**. `resolve.py` legge l'orologio a muro, quindi il
+watchdog applicava il programma di due ore prima e sovrascriveva ogni dodici
+minuti quello che il tick di slot aveva appena messo a posto.
 
-Vedi `CLAUDE.md` → «Prossimi passi» per l'elenco completo (lettura degli
-offset locali della sonda 4691, eventuale riconfigurazione a termostato
-hotel, fork personale di MyHOME, test con
-`pytest-homeassistant-custom-component`, prova del pannello dentro un'istanza
-HA reale).
+Corretto in 0.9.0 (`_as_local` in `coordinator.py`), insieme a due difetti
+emersi dalla stessa analisi: `target_for` che non verificava la scadenza degli
+override, e `note_write` che registrava l'eco anche per scritture mai partite.
+
+Il metodo è annotato in `CLAUDE.md` → «Apprendimenti»; lo strumento resta in
+`diagnostics/` per la prossima volta.
+
+## 2. Da verificare in stagione di riscaldamento
+
+La trace è stata fatta in agosto, con l'impianto fermo (sonde a 27–30 °C,
+attuatori chiusi). Due cose non sono quindi state messe alla prova:
+
+- [ ] **La 3550 riasserisce davvero il proprio programma?** In agosto no. Se in
+      inverno si vedessero scritture non attribuibili a CTHA, rilanciare
+      `diagnostics/own_bus_trace.py` e confrontare periodicità e spaziatura
+      prima di concludere
+- [ ] **Il §3.1 della sonda 4691** (setpoint esterno «temporaneo fino al
+      prossimo cambio dalla centrale») non si è manifestato: quattro zone hanno
+      tenuto per venti minuti un valore scritto da fuori senza tornare indietro
+
+## 3. Voci più a lungo termine
+
+Vedi `CLAUDE.md` → «Prossimi passi» (lettura degli offset locali della sonda
+4691, eventuale riconfigurazione a termostato hotel, fork personale di MyHOME,
+test con `pytest-homeassistant-custom-component`, prova del pannello dentro
+un'istanza HA reale).

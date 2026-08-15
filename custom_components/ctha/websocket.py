@@ -21,6 +21,7 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -105,7 +106,7 @@ def _zone_runtime(coordinator: CthaCoordinator, zone_id: str) -> dict[str, Any]:
     """Cosa sta tenendo la zona in questo momento, e da dove viene il valore."""
     resolution = coordinator.resolution_for(zone_id)
     chain = coordinator.chain_for(zone_id)
-    override = coordinator.overrides.get(zone_id)
+    override = coordinator.overrides.active(zone_id, dt_util.now())
     return {
         "entity_id": coordinator.entity_ids.get(zone_id),
         "level": resolution.level,

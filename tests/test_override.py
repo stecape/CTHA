@@ -123,6 +123,41 @@ def test_until_level_change_con_slot_che_eredita(
     assert override_mod.is_expired(override, NEXT_BAND, "default", HIGH)
 
 
+def test_active_tace_su_un_override_gia_decaduto(
+    data: models.CthaData, manager: override_mod.OverrideManager
+) -> None:
+    """`get` dice cos'è registrato, `active` cos'è ancora valido.
+
+    La differenza è tutta nella finestra fra un purge e l'altro: il purge passa
+    ai confini di slot, quindi fino a mezz'ora un override decaduto resta scritto
+    nel modello. Chi legge il setpoint in quel mentre — watchdog, entità,
+    pannello — non deve vederlo.
+    """
+    manager.set("z1", 24.0, NOW, policy=POLICY_UNTIL_LEVEL_CHANGE)
+
+    assert manager.active("z1", SAME_BAND) is not None
+    assert manager.active("z1", NEXT_BAND) is None
+    assert manager.get("z1") is not None
+
+
+def test_active_senza_override_non_inventa_nulla(
+    manager: override_mod.OverrideManager,
+) -> None:
+    """Una zona senza override risponde `None` a qualunque istante."""
+    assert manager.active("z1", NOW) is None
+
+
+def test_active_rispetta_gli_override_hardware(
+    manager: override_mod.OverrideManager,
+) -> None:
+    """La manopola non decade mai: nessun comando software può annullarla."""
+    manager.set(
+        "z1", 24.0, NOW, source=OVERRIDE_SOURCE_HARDWARE, policy=POLICY_NEXT_SLOT
+    )
+
+    assert manager.active("z1", NOW + timedelta(days=30)) is not None
+
+
 def test_until_scenario_change(manager: override_mod.OverrideManager) -> None:
     """Resiste al tempo, decade al cambio di scenario."""
     override = manager.set("z1", 24.0, NOW, policy=POLICY_UNTIL_SCENARIO_CHANGE)

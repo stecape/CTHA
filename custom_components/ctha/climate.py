@@ -200,7 +200,7 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
     @property
     def preset_mode(self) -> str | None:
         """Livello risolto dal programma; `None` mentre un override è attivo."""
-        if self.coordinator.overrides.get(self._zone_id) is not None:
+        if self.coordinator.overrides.active(self._zone_id, dt_util.now()) is not None:
             return None
         return self.coordinator.resolution_for(self._zone_id).level
 
@@ -219,7 +219,8 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
             ATTR_SCENARIO: self.coordinator.data.active_scenario,
             ATTR_TARGET_ENTITY: self._target_entity_id,
         }
-        if (override := self.coordinator.overrides.get(self._zone_id)) is not None:
+        override = self.coordinator.overrides.active(self._zone_id, dt_util.now())
+        if override is not None:
             attributes[ATTR_OVERRIDE_SOURCE] = override.source
             attributes[ATTR_OVERRIDE_POLICY] = override.policy
             attributes[ATTR_OVERRIDE_EXPIRES] = (
@@ -346,6 +347,12 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
                         attempt,
                         WRITE_ATTEMPTS,
                     )
+                # L'eco si annota qui, accanto al comando che parte davvero, e a
+                # ogni tentativo: è l'unico punto che sa che una scrittura c'è
+                # stata, e ogni ritentativo produce un'eco propria da riconoscere.
+                self.coordinator.overrides.note_write(
+                    self._zone_id, temperature, dt_util.now()
+                )
                 await self._async_write_setpoint(temperature)
                 # Il valore torna dal bus come cambio di stato, non come esito
                 # della chiamata: senza questa attesa si verificherebbe sempre
@@ -464,7 +471,7 @@ class CthaThermostat(CoordinatorEntity[CthaCoordinator], ClimateEntity):
         if desired is not None and abs(desired - setpoint) <= WRITE_DEADBAND:
             return
 
-        existing = self.coordinator.overrides.get(self._zone_id)
+        existing = self.coordinator.overrides.active(self._zone_id, dt_util.now())
         if existing is not None and abs(existing.temperature - setpoint) <= WRITE_DEADBAND:
             return
 

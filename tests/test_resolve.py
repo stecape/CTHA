@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from conftest import HIGH, LOW, MORNING, NIGHT
@@ -34,6 +34,34 @@ from ctha.const import (
 def test_slot_index(moment: datetime, expected: int) -> None:
     """Ogni mezz'ora è uno slot, dalla mezzanotte alle 23:30."""
     assert resolve.slot_index(moment) == expected
+
+
+def test_slot_index_legge_l_orologio_a_muro() -> None:
+    """Lo slot dipende dall'ora scritta nell'istante, non dall'istante assoluto.
+
+    Qui non si può fare altrimenti: `resolve` non importa Home Assistant e non
+    conosce il fuso configurato. È però la ragione per cui il coordinator deve
+    convertire in ora locale *prima* di chiamare — e il motivo per cui questo
+    test esiste. Il watchdog girava su `async_track_time_interval`, che consegna
+    UTC, mentre il tick di slot riceveva l'ora locale: i due scrivevano il
+    programma di fasce diverse, e la zona rimbalzava fra i due valori.
+    """
+    locale = datetime(2026, 8, 15, 23, 2, tzinfo=timezone(timedelta(hours=2)))
+
+    assert resolve.slot_index(locale) == 46
+    assert resolve.slot_index(locale.astimezone(timezone.utc)) == 42
+
+
+def test_lo_scarto_di_fuso_dopo_mezzanotte_sposta_il_giorno() -> None:
+    """Dopo mezzanotte l'istante non convertito cambia anche la giornata tipo.
+
+    Peggio dello slot sbagliato: alle 01:00 di domenica, in UTC è ancora sabato,
+    quindi la settimana tipo pescherebbe il giorno prima.
+    """
+    locale = datetime(2026, 8, 16, 1, 0, tzinfo=timezone(timedelta(hours=2)))
+
+    assert locale.weekday() == 6  # domenica
+    assert locale.astimezone(timezone.utc).weekday() == 5  # sabato
 
 
 def test_slot_start_tronca_al_confine() -> None:

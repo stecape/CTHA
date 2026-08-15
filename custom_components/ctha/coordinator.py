@@ -43,6 +43,24 @@ ZoneWriter = Callable[[float], Awaitable[None]]
 ProgramEdit = Callable[[CthaData], Any]
 
 
+def _as_local(now: datetime | None) -> datetime:
+    """Riporta l'istante all'ora locale, l'unica che il programma sappia leggere.
+
+    I timer di Home Assistant non consegnano la stessa cosa:
+    `async_track_time_change` chiama con l'ora locale, mentre
+    `async_track_time_interval` e `async_call_later` chiamano con UTC. Il nucleo
+    puro legge `hour`, `minute` e `weekday` così come li trova — non può fare
+    altrimenti, non conosce il fuso configurato in HA — quindi un istante UTC gli
+    fa risolvere la fascia sbagliata di tante mezz'ore quanto vale l'offset, e
+    nelle ore dopo mezzanotte perfino la giornata tipo di ieri.
+
+    Convertire qui, all'unico confine fra HA e le funzioni pure, è ciò che
+    impedisce che la differenza fra i due timer diventi di nuovo una differenza
+    fra i setpoint scritti.
+    """
+    return dt_util.now() if now is None else dt_util.as_local(now)
+
+
 class CthaCoordinator(DataUpdateCoordinator[CthaData]):
     """Tiene insieme modello, override e i due timer che li fanno vivere."""
 
@@ -136,7 +154,7 @@ class CthaCoordinator(DataUpdateCoordinator[CthaData]):
 
     def resolution_for(self, zone_id: str, now: datetime | None = None) -> Resolution:
         """Risoluzione da programma per la zona, senza considerare gli override."""
-        return resolve_setpoint(self.data, zone_id, now or dt_util.now())
+        return resolve_setpoint(self.data, zone_id, _as_local(now))
 
     def chain_for(self, zone_id: str, now: datetime | None = None) -> Chain:
         """Percorso che la zona sta seguendo: scenario, settimana, giornata.
@@ -144,33 +162,47 @@ class CthaCoordinator(DataUpdateCoordinator[CthaData]):
         Il pannello ha bisogno di nominarlo — «segue Invernale, oggi Feriale» —
         e la catena è già calcolata durante la risoluzione.
         """
-        return resolve_chain(self.data, zone_id, now or dt_util.now())
+        return resolve_chain(self.data, zone_id, _as_local(now))
 
     def target_for(self, zone_id: str, now: datetime | None = None) -> float | None:
-        """Setpoint effettivo: l'override attivo se c'è, altrimenti il programma."""
-        if (override := self.overrides.get(zone_id)) is not None:
+        """Setpoint effettivo: l'override ancora valido se c'è, altrimenti il programma.
+
+        La validità va verificata qui e non lasciata al solo `purge_expired`:
+        quello passa ai confini di slot, mentre questo lo si legge in continuazione
+        — dal watchdog, dalle entità, dal pannello — e nel frattempo un override
+        decaduto continuerebbe a decidere il setpoint.
+        """
+        moment = _as_local(now)
+        if (override := self.overrides.active(zone_id, moment)) is not None:
             return override.temperature
-        return self.resolution_for(zone_id, now).temperature
+        return self.resolution_for(zone_id, moment).temperature
 
     # --- Scrittura ----------------------------------------------------------
 
     async def async_apply_zone(self, zone_id: str, now: datetime | None = None) -> None:
-        """Applica alla zona il setpoint corrente, annotando la scrittura."""
+        """Applica alla zona il setpoint corrente.
+
+        L'eco della scrittura non si annota qui: da qui non si sa se una
+        scrittura ci sarà davvero, perché il writer tace quando il valore è già
+        sul bus o la zona è spenta. Annotarla comunque significherebbe aspettare
+        l'eco di un comando mai partito, e per tutta la finestra scambiare per
+        nostra una mano altrui che porti la zona proprio a quel valore.
+        """
         if (writer := self._writers.get(zone_id)) is None:
             return
-        if (target := self.target_for(zone_id, now)) is None:
+        if (target := self.target_for(zone_id, _as_local(now))) is None:
             return
 
-        self.overrides.note_write(zone_id, target, now or dt_util.now())
         await writer(target)
 
     async def async_apply_all(self, now: datetime | None = None) -> None:
         """Riscrive tutte le zone scaglionando le scritture sul bus."""
+        moment = _as_local(now)
         for index, zone_id in enumerate(list(self._writers)):
             if index:
                 await asyncio.sleep(WRITE_STAGGER_SECONDS)
             try:
-                await self.async_apply_zone(zone_id, now)
+                await self.async_apply_zone(zone_id, moment)
             except Exception:  # noqa: BLE001 - una zona non deve fermare le altre
                 _LOGGER.exception("Riconciliazione fallita per la zona %s", zone_id)
 
@@ -254,9 +286,10 @@ class CthaCoordinator(DataUpdateCoordinator[CthaData]):
 
     async def _async_slot_tick(self, now: datetime) -> None:
         """A ogni confine di slot: scadenze degli override e nuovi setpoint."""
-        if self.overrides.purge_expired(now):
+        moment = _as_local(now)
+        if self.overrides.purge_expired(moment):
             self._store.async_schedule_save()
-        await self.async_apply_all(now)
+        await self.async_apply_all(moment)
         self.async_update_listeners()
 
     async def _async_reconcile(self, now: datetime) -> None:

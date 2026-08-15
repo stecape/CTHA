@@ -177,15 +177,29 @@ unico bus.
   dipinti restano validi) e riscrive lo scenario come mappa delle zone. Gli
   offset non hanno più un posto: quello generale diventa una tabella di
   temperature esplicite dello scenario, le eccezioni per zona si perdono.
-- **`coordinator.py`**: `CthaCoordinator` espone `target_for` (override se
-  presente, altrimenti programma) e applica i setpoint tramite writer
-  registrati dalle entità. Due timer: uno a ogni confine di slot (00 e 30),
-  uno ogni `RECONCILE_INTERVAL` per il watchdog. `async_edit` è l'unico
+- **`coordinator.py`**: `CthaCoordinator` espone `target_for` (l'override
+  ancora valido se c'è, altrimenti programma) e applica i setpoint tramite
+  writer registrati dalle entità. Due timer: uno a ogni confine di slot (00 e
+  30), uno ogni `RECONCILE_INTERVAL` per il watchdog. `async_edit` è l'unico
   ingresso per le modifiche al programma: esegue l'operazione di `program.py`,
   persiste e programma la riscrittura delle zone. La riscrittura è debounced
   (`APPLY_DEBOUNCE_SECONDS`) perché una griglia dipinta col mouse produce
   decine di modifiche e ogni riscrittura completa occupa il bus per 1.5 s per
   zona.
+  - **Ogni istante che entra nel nucleo puro passa da `_as_local`.** I timer di
+    HA non consegnano la stessa cosa: `async_track_time_change` chiama con
+    l'ora locale, `async_track_time_interval` e `async_call_later` con UTC.
+    `resolve.py` legge `hour`, `minute` e `weekday` grezzi — non conosce il
+    fuso di HA e non può conoscerlo — quindi un istante UTC gli fa risolvere la
+    fascia sbagliata, e dopo mezzanotte anche la giornata tipo di ieri. È il
+    difetto che faceva rimbalzare le zone fra due valori: il tick di slot
+    scriveva la fascia giusta, il watchdog quella di due ore prima, e i due si
+    sovrascrivevano a vicenda ogni dodici minuti.
+  - `target_for` **verifica la scadenza**, non si limita a leggere il registro:
+    `purge_expired` passa solo ai confini di slot, quindi fino a mezz'ora un
+    override decaduto resta scritto nel modello. `OverrideManager.get` dice
+    cos'è registrato, `active` cos'è ancora valido — chi decide un setpoint
+    vuole il secondo.
 - **`CthaThermostat` (climate.py)**: entità di zona, sovrapposta al termostato
   reale. È l'adattatore fra il programma e il bus.
   - Rispecchia dal termostato pilotato ciò che è suo: temperatura misurata,
@@ -207,14 +221,22 @@ unico bus.
     stato e non come esito della chiamata. Un lock per zona impedisce che tick
     di slot e watchdog intreccino due cicli sullo stesso termostato,
     verificandosi a vicenda il valore dell'altro.
+  - **L'eco si annota dove il comando parte davvero**, cioè dentro
+    `_async_apply_setpoint`, accanto alla chiamata al servizio e a ogni
+    ritentativo. Annotarla nel coordinator, prima di invocare il writer,
+    significava aspettare l'eco di scritture mai partite — il writer tace se il
+    valore è già sul bus o se la zona è spenta — e per tutta `ECHO_WINDOW`
+    scambiare per propria una mano altrui che portasse la zona proprio a quel
+    valore: nessun override, nessun log.
   - `_async_note_external`: ogni cambio del setpoint sul termostato che non sia
-    un'eco nostra diventa un override `external` con policy `next_slot`. Dal
-    bus la manopola, l'app e la centrale arrivano identiche — l'unica cosa
-    dicibile è "non l'ho scritto io", e tenerlo fino al prossimo slot è meno
-    peggio sia dell'ignorarlo sia del litigarci ogni minuto. Se a riasserire è
-    la 3550, il rimedio vero resta appiattirne il programma.
+    un'eco nostra diventa un override `external` con policy
+    `until_level_change`. Dal bus la manopola, l'app e la centrale arrivano
+    identiche — l'unica cosa dicibile è "non l'ho scritto io", e tenerlo per la
+    fascia in corso è meno peggio sia dell'ignorarlo sia del litigarci ogni
+    minuto. Se a riasserire è la 3550, il rimedio vero resta appiattirne il
+    programma.
   - `async_set_temperature` e `async_set_preset_mode` creano un **override**
-    (policy `next_slot`), non modificano il programma.
+    (policy `until_level_change`), non modificano il programma.
   - `async_set_hvac_mode` inoltra al termostato; riaccendendo si preferisce
     `heat` ad `auto`, perché su BTicino `auto` significa "segui il programma
     della centrale", cioè proprio ciò che CTHA sta sostituendo.
@@ -387,11 +409,14 @@ progressive. Stato attuale di ciascun pezzo:
 - **Mitigazione dei conflitti con l'unità centrale 3550**: il loop di
   riconciliazione watchdog è *fatto* (`coordinator.py`, `RECONCILE_INTERVAL`
   = 12 min, scritture scaglionate di `WRITE_STAGGER_SECONDS` = 1.5 s). Resta
-  *da fare* la parte che non è software: mettere la 3550 in una modalità che
-  **regoli senza programmare**, cioè Manuale su tutte le zone (manuale
-  d'installazione §5.1.2, «temperatura fissa senza fasce orarie»). Il programma
-  settimanale della centrale è l'unica cosa che riasserisce setpoint ai propri
-  confini orari; la sua regolazione, invece, serve e va lasciata lavorare.
+  *eventualmente* da fare la parte che non è software: mettere la 3550 in una
+  modalità che **regoli senza programmare**, cioè Manuale su tutte le zone
+  (manuale d'installazione §5.1.2, «temperatura fissa senza fasce orarie»). Il
+  suo programma settimanale sarebbe l'unica cosa a riasserire setpoint ai
+  propri confini orari; la sua regolazione, invece, serve e va lasciata
+  lavorare. Da tenere presente però che la trace del 15 agosto 2026 **non ha
+  registrato una sola scrittura della centrale**: il conflitto è plausibile ma
+  non ancora osservato, e va misurato prima di intervenire.
 - **Servizi HA** — *fatti*: 15 servizi, elencati nel README. Oltre agli
   override coprono livelli di temperatura (`set_level`, `delete_level`),
   setpoint per ambito (`set_setpoint`), giornate tipo (`set_day_template`,
@@ -412,19 +437,19 @@ progressive. Stato attuale di ciascun pezzo:
 
 ## Prossimi passi
 
-**Step immediato in corso, con checklist operativa: vedi `todo.md`** (diagnosi
-del rimbalzo di setpoint tramite `diagnostics/own_bus_trace.py`, uno script
-standalone che ascolta il bus OpenWebNet — va eseguito su una macchina con
-accesso alla LAN del gateway, non in un ambiente cloud).
+Il rimbalzo di setpoint che occupava questa sezione **è stato diagnosticato e
+corretto** il 15 agosto 2026 — non era la 3550, era CTHA. Vedi «Apprendimenti»
+per la trace e il metodo; `todo.md` conserva l'esito della checklist.
 
 - Lettura dei messaggi di offset locale della sonda 4691, per distinguere la
   manopola fisica dalle altre sorgenti esterne. È l'ultimo pezzo che richiede di
   entrare dentro MyHOME
-- Mettere la 3550 in Manuale su tutte le zone e verificare col log di debug che
-  le riasserzioni simultanee su più zone spariscano. È la firma che distingue la
-  centrale dalla manopola: la manopola muove una zona, la centrale ne muove
-  molte nello stesso istante. Se funziona, è la soluzione a costo zero: senza
-  cambi di setpoint dalla centrale, ciò che scrive CTHA non scade
+- Riverificare in stagione se la 3550 riasserisca davvero il proprio programma.
+  Nella trace di agosto **non ha scritto un solo setpoint in un'ora e mezza**,
+  quindi il conflitto con la centrale resta un'ipotesi non dimostrata. Se si
+  ripresenta, la mossa a costo zero è metterla in Manuale su tutte le zone; ma
+  non va fatto preventivamente, perché nel frattempo si è visto che il rimbalzo
+  attribuito a lei aveva un'altra causa
 - Valutare la riconfigurazione delle sonde come **termostato hotel** (`TYPE`
   sulla sonda): in quella modalità la sonda regola da sé i propri attuatori, non
   esiste centrale che riasserisca, e il comando da remoto resta — è la forma che
@@ -462,10 +487,36 @@ accesso alla LAN del gateway, non in un ambiente cloud).
 - L'integrazione MyHOME gestisce effettivamente i messaggi di offset locale
   dalla manopola della sonda — confermato ispezionando direttamente il
   repository GitHub.
-- La riasserzione del proprio *programma settimanale* da parte della 3550 è una
-  fonte primaria di conflitti e va neutralizzata attivamente. Neutralizzare il
-  programma, però, non vuol dire neutralizzare la centrale: quella regola, e
-  serve.
+- **Il rimbalzo di setpoint attribuito per settimane alla 3550 era CTHA.**
+  Diagnosi del 15 agosto 2026 con `diagnostics/own_bus_trace.py` su un'ora e
+  mezza di bus: dei venti frame di setpoint registrati, **tutti** erano
+  attribuibili a CTHA o all'utente, e **la centrale non ne ha scritto nessuno**.
+  La causa era il fuso orario — vedi il punto seguente. Da qui due lezioni di
+  metodo che è costato caro imparare:
+  - il criterio diagnostico «una zona = manopola, molte zone = centrale» **non
+    discrimina**, perché anche CTHA scrive molte zone insieme con valori
+    diversi. Ciò che identifica lo scrivente è la **periodicità** (12 minuti
+    esatti, fase costante al centesimo di secondo) e la **spaziatura**
+    (`WRITE_STAGGER_SECONDS` + `WRITE_VERIFY_SECONDS` = 3,0 s), più l'ordine
+    delle zone: la centrale le percorrerebbe in ordine numerico, CTHA segue
+    l'ordine delle config entry;
+  - prima di accusare l'impianto, misurare. L'ipotesi «è la centrale» era
+    plausibile, documentata dal manuale e sbagliata, e ha orientato per
+    settimane il piano di lavoro verso un intervento che non avrebbe risolto
+    nulla.
+- **Ogni istante che entra in `resolve.py` dev'essere ora locale.** I timer di
+  Home Assistant non concordano: `async_track_time_change` chiama con l'ora
+  locale, `async_track_time_interval` e `async_call_later` con UTC. Il nucleo
+  puro non importa HA, quindi non conosce il fuso configurato e legge `hour`,
+  `minute` e `weekday` grezzi. Il watchdog, che gira sul timer a intervallo,
+  applicava così il programma di due ore prima (l'offset CEST), riscrivendo ogni
+  dodici minuti ciò che il tick di slot aveva appena messo giusto; dopo
+  mezzanotte avrebbe usato pure la giornata tipo di ieri. La conversione sta in
+  `_as_local`, all'unico confine fra HA e le funzioni pure.
+- La riasserzione del proprio *programma settimanale* da parte della 3550
+  **resta un rischio plausibile ma non osservato**. Se e quando si manifesterà,
+  neutralizzare il programma non vuol dire neutralizzare la centrale: quella
+  regola, e serve.
 - **Finché la sonda è configurata come «sonda MyHOME», il setpoint scritto da
   CTHA è provvisorio per progetto.** Il manuale installatore della H/LN4691
   (§3.1) dice che un'impostazione diversa da quella della centrale «è temporanea
@@ -484,7 +535,15 @@ accesso alla LAN del gateway, non in un ambiente cloud).
 - Gli offset della manopola della sonda sono una questione a livello hardware:
   nessun comando software può annullarli, solo compensarli o visualizzarli.
 - Il rilevamento echo e la tolleranza deadband (0.15 °C) sono necessari per
-  prevenire loop di feedback tra override e scritture.
+  prevenire loop di feedback tra override e scritture. **L'eco va annotata solo
+  quando un comando parte davvero**: annotarla in anticipo, dove non si sa
+  ancora se il writer scriverà, fa sì che per tutta `ECHO_WINDOW` una mano
+  altrui su quel valore venga scambiata per la propria e scartata in silenzio.
+- **Una scadenza che si consuma solo a intervalli va verificata anche in
+  lettura.** `purge_expired` passa ai confini di slot; nella mezz'ora in mezzo un
+  override decaduto resta scritto nel modello, e chi lo legge per decidere un
+  setpoint deve chiedersi se è ancora valido. Da qui la coppia
+  `OverrideManager.get` (cos'è registrato) / `active` (cos'è ancora valido).
 - Il fatto che l'integrazione MyHOME upstream non sia mantenuta rende un
   fork personale una necessità pratica per la stabilità a lungo termine.
 
