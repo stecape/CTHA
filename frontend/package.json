@@ -1,6 +1,6 @@
 {
   "name": "ctha-frontend",
-  "version": "0.8.0",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "description": "Pannello React di CTHA, impacchettato come Web Component per Home Assistant",

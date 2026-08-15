@@ -6,6 +6,13 @@
 // soprattutto un trascinamento resta *un* intervallo — che è esattamente ciò
 // che il servizio `paint_slots` si aspetta.
 //
+// Su un telefono però quel gesto ne ha un altro addosso: la griglia è più larga
+// dello schermo, e lo stesso dito che dipinge dovrebbe anche scorrerla. Non
+// esiste un modo di indovinare quale dei due si intende — un trascinamento
+// orizzontale sulla riga è esattamente uguale nei due casi — quindi la scelta è
+// esplicita, con un interruttore «Scorri / Dipingi». Il mouse non ci passa: il
+// trascinamento col mouse non ha mai scrollato niente, quindi dipinge sempre.
+//
 // I colori arrivano dal modello e non dal foglio di stile: i livelli si creano
 // dal pannello, quindi una classe CSS per livello non esisterebbe.
 
@@ -13,6 +20,11 @@ import { useRef, useState } from "react";
 
 import { SLOTS_PER_DAY, WEEKDAYS, levelAt, slotRange, sortedDayTemplates } from "./model";
 import type { Program, TemperatureLevel } from "./types";
+
+// L'interruttore ha senso solo dove esiste un dito. Su un desktop senza touch
+// mostrarlo vorrebbe dire offrire una modalità che non cambia nulla.
+const HAS_TOUCH =
+  typeof navigator !== "undefined" && (navigator.maxTouchPoints ?? 0) > 0;
 
 interface Drag {
   weekday: number;
@@ -44,6 +56,10 @@ export function WeekGrid({
   const [drag, setDrag] = useState<Drag | null>(null);
   const dragRef = useRef<Drag | null>(null);
 
+  // Si parte da «Scorri»: il primo gesto su una griglia appena aperta è
+  // guardarla, e una pennellata involontaria cambia il programma sul serio.
+  const [touchPaints, setTouchPaints] = useState(false);
+
   const week = program.week_templates[weekId];
   if (!week) return null;
 
@@ -71,6 +87,14 @@ export function WeekGrid({
     );
   };
 
+  // Un gesto annullato — il sistema che se lo prende, una notifica che passa —
+  // non è una pennellata più corta: è una pennellata che l'utente non ha
+  // finito, e va buttata invece che scritta.
+  const abortDrag = () => {
+    dragRef.current = null;
+    setDrag(null);
+  };
+
   const templates = sortedDayTemplates(program);
 
   const slotAt = (element: HTMLElement, clientX: number): number => {
@@ -83,45 +107,82 @@ export function WeekGrid({
   };
 
   return (
-    <div className="grid-scroll">
-      <div className="grid">
-        <div />
-        <div className="hours">
-          {Array.from({ length: 8 }, (_, index) => (
-            <span key={index}>{String(index * 3).padStart(2, "0")}</span>
-          ))}
+    <>
+      {HAS_TOUCH && (
+        <div className="grid-modes">
+          <div
+            className="switch"
+            role="group"
+            aria-label="Cosa fa il dito sulle fasce"
+          >
+            <button
+              className="switch-option"
+              aria-pressed={!touchPaints}
+              onClick={() => setTouchPaints(false)}
+            >
+              Scorri
+            </button>
+            <button
+              className="switch-option"
+              aria-pressed={touchPaints}
+              onClick={() => setTouchPaints(true)}
+            >
+              Dipingi
+            </button>
+          </div>
+          <span className="hint">
+            {touchPaints
+              ? "Il dito dipinge le fasce. Per spostarti nella giornata trascina sul righello delle ore o sul nome del giorno."
+              : "Il dito scorre le fasce e non le cambia. Passa a «Dipingi» per programmare."}
+          </span>
         </div>
+      )}
 
-        {WEEKDAYS.map((name, weekday) => {
-          const templateId = week.days[String(weekday)];
-          const template = templateId
-            ? program.day_templates[templateId]
-            : undefined;
-          const slots = template ? slotsFor(template.id) : "";
-          const shared = template ? sharedDays(weekday, template.id) : 0;
+      <div className="grid-scroll">
+        <div className="grid">
+          <div className="corner" />
+          <div className="hours">
+            {Array.from({ length: 8 }, (_, index) => (
+              <span key={index}>{String(index * 3).padStart(2, "0")}</span>
+            ))}
+          </div>
 
-          return (
-            <Row
-              key={weekday}
-              program={program}
-              name={name}
-              weekday={weekday}
-              slots={slots}
-              shared={shared}
-              templateId={template?.id ?? ""}
-              templates={templates.map((item) => ({ id: item.id, name: item.name }))}
-              brush={brush}
-              drag={drag?.weekday === weekday ? drag : null}
-              onAssign={onAssign}
-              onDragStart={(slot) => startDrag(weekday, slot)}
-              onDragMove={(slot) => moveDrag(weekday, slot)}
-              onDragEnd={() => endDrag(weekday)}
-              slotAt={slotAt}
-            />
-          );
-        })}
+          {WEEKDAYS.map((name, weekday) => {
+            const templateId = week.days[String(weekday)];
+            const template = templateId
+              ? program.day_templates[templateId]
+              : undefined;
+            const slots = template ? slotsFor(template.id) : "";
+            const shared = template ? sharedDays(weekday, template.id) : 0;
+
+            return (
+              <Row
+                key={weekday}
+                program={program}
+                name={name}
+                weekday={weekday}
+                slots={slots}
+                shared={shared}
+                templateId={template?.id ?? ""}
+                templates={templates.map((item) => ({
+                  id: item.id,
+                  name: item.name,
+                }))}
+                brush={brush}
+                drag={drag?.weekday === weekday ? drag : null}
+                touchPaints={touchPaints}
+                onAssign={onAssign}
+                onDragStart={(slot) => startDrag(weekday, slot)}
+                onDragMove={(slot) => moveDrag(weekday, slot)}
+                onDragEnd={() => endDrag(weekday)}
+                onDragAbort={abortDrag}
+                slotAt={slotAt}
+              />
+            );
+          })}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -135,10 +196,12 @@ function Row({
   templates,
   brush,
   drag,
+  touchPaints,
   onAssign,
   onDragStart,
   onDragMove,
   onDragEnd,
+  onDragAbort,
   slotAt,
 }: {
   program: Program;
@@ -150,10 +213,12 @@ function Row({
   templates: { id: string; name: string }[];
   brush: TemperatureLevel | null;
   drag: Drag | null;
+  touchPaints: boolean;
   onAssign: (weekday: number, templateId: string | null) => void;
   onDragStart: (slot: number) => void;
   onDragMove: (slot: number) => void;
   onDragEnd: () => void;
+  onDragAbort: () => void;
   slotAt: (element: HTMLElement, clientX: number) => number;
 }) {
   const painting = drag
@@ -191,11 +256,16 @@ function Row({
 
       {templateId ? (
         <div
-          className="row-cells"
+          className={["row-cells", touchPaints ? "painting-mode" : ""]
+            .filter(Boolean)
+            .join(" ")}
           role="group"
           aria-label={`Programma di ${name}`}
           onPointerDown={(event) => {
             if (event.button !== 0 && event.pointerType === "mouse") return;
+            // In «Scorri» il dito non è una pennellata: lasciarlo passare senza
+            // catturarlo è ciò che permette al browser di scorrere la griglia.
+            if (event.pointerType === "touch" && !touchPaints) return;
             event.currentTarget.setPointerCapture(event.pointerId);
             onDragStart(slotAt(event.currentTarget, event.clientX));
           }}
@@ -203,7 +273,7 @@ function Row({
             onDragMove(slotAt(event.currentTarget, event.clientX))
           }
           onPointerUp={onDragEnd}
-          onPointerCancel={onDragEnd}
+          onPointerCancel={onDragAbort}
         >
           {Array.from({ length: SLOTS_PER_DAY }, (_, slot) => {
             const inPaint =

@@ -50,7 +50,11 @@
   justify-content: space-between;
 }
 
-.tabs {
+/* `.tabs` è la navigazione del pannello, `.switch` una scelta locale dentro una
+   scheda: stessa forma a pillola, due cose diverse — tenerle distinte evita che
+   un domani si contino le viste e si trovino anche gli interruttori. */
+.tabs,
+.switch {
   display: flex;
   gap: 4px;
   background: var(--ctha-card);
@@ -59,7 +63,8 @@
   border: 1px solid var(--ctha-divider);
 }
 
-.tab {
+.tab,
+.switch-option {
   border: 0;
   background: transparent;
   color: var(--ctha-muted);
@@ -70,9 +75,19 @@
   cursor: pointer;
 }
 
-.tab[aria-selected="true"] {
+.tab[aria-selected="true"],
+.switch-option[aria-pressed="true"] {
   background: var(--ctha-accent);
   color: #fff;
+}
+
+.switch {
+  padding: 3px;
+}
+
+.switch-option {
+  padding: 5px 14px;
+  font-size: 13px;
 }
 
 .scenario-bar {
@@ -240,17 +255,38 @@ label.field {
 
 /* --- Griglia -------------------------------------------------------------- */
 
+/* La griglia è più larga dello schermo di un telefono, quindi scorre in
+   orizzontale. `overscroll-behavior-x` evita che arrivare in fondo diventi la
+   gesture «indietro» del browser. */
 .grid-scroll {
   overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 
+/* `pan-x pan-y`, non `pan-y`: dichiarare solo l'asse verticale impediva al
+   browser di scorrere la griglia proprio nell'unico verso in cui è tagliata. */
 .grid {
   min-width: 640px;
   display: grid;
   grid-template-columns: minmax(150px, 200px) 1fr;
   gap: 4px 8px;
   align-items: center;
-  touch-action: pan-y;
+  touch-action: pan-x pan-y;
+}
+
+/* Il righello delle ore e la colonna dei giorni restano sempre pannabili: sono
+   la presa per scorrere la griglia anche quando le righe dipingono. */
+.grid-modes {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 4px 0 12px;
+}
+
+.grid-modes .hint {
+  flex: 1 1 240px;
+  font-size: 12px;
 }
 
 .hours {
@@ -333,6 +369,11 @@ label.field {
   color: var(--ctha-muted);
 }
 
+/* Di base la riga lascia scorrere: il dito che la attraversa sta cercando le
+   ore nascoste, non sta programmando. Solo in modalità «Dipingi» la riga si
+   prende il gesto (`touch-action: none`), che è ciò che serve al trascinamento
+   per non essere interrotto dallo scorrimento. Il mouse dipinge in entrambe:
+   `touch-action` non lo riguarda. */
 .row-cells {
   display: grid;
   grid-template-columns: repeat(48, 1fr);
@@ -342,7 +383,12 @@ label.field {
   border: 1px solid var(--ctha-divider);
   cursor: crosshair;
   user-select: none;
+  touch-action: pan-x pan-y;
+}
+
+.row-cells.painting-mode {
   touch-action: none;
+  border-color: color-mix(in srgb, var(--ctha-accent) 55%, var(--ctha-divider));
 }
 
 .row-cells.empty {
@@ -580,4 +626,58 @@ input[type="color"] {
   padding: 48px;
   text-align: center;
   color: var(--ctha-muted);
+}
+
+/* --- Schermi stretti ------------------------------------------------------ */
+
+/* Su un telefono la colonna dei giorni si mangiava metà della larghezza, e
+   quella metà era proprio quella che serve alle fasce: il nome del giorno e il
+   menù della giornata tipo passano sopra la riga, così i 48 slot hanno tutto lo
+   schermo. Restano più larghi della finestra — 48 mezz'ore leggibili non ci
+   stanno in 350 px — ma ora la griglia si scorre davvero.
+   L'etichetta è `sticky` a sinistra: scorrendo verso sera il nome del giorno
+   resta visibile, altrimenti si perde di vista quale riga si sta dipingendo. */
+@media (max-width: 700px) {
+  .ctha-root {
+    padding: 12px 8px;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+    min-width: 520px;
+    gap: 2px 0;
+  }
+
+  /* L'angolo vuoto teneva il posto della colonna dei giorni: senza quella
+     colonna diventerebbe una riga vuota in cima. */
+  .corner {
+    display: none;
+  }
+
+  .hours {
+    grid-column: 1;
+  }
+
+  .day-label {
+    position: sticky;
+    left: 0;
+    justify-self: start;
+    max-width: 92vw;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding-right: 10px;
+    background: var(--ctha-card);
+    z-index: 1;
+  }
+
+  .day-label .template {
+    max-width: 46vw;
+  }
+
+  /* Un bersaglio più alto: la riga qui si tocca col dito, non col mouse. */
+  .row-cells {
+    height: 42px;
+  }
 }

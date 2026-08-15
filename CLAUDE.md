@@ -288,6 +288,24 @@ Il frontend è React dentro un Web Component su shadow root (`frontend/src/`):
   trascinamento resta *un* intervallo — la forma che `paint_slots` si aspetta.
   Lo stato del trascinamento vive anche in una ref, perché il rilascio può
   arrivare prima che React abbia applicato lo stato della pressione.
+  - Su un telefono quel gesto ne ha un altro addosso: la griglia è più larga
+    dello schermo, e lo stesso dito dovrebbe anche scorrerla. I due
+    trascinamenti sono indistinguibili, quindi la scelta è esplicita —
+    l'interruttore **«Scorri / Dipingi»**, che compare solo dove esiste un dito
+    (`navigator.maxTouchPoints`) e parte da «Scorri». Il mouse non ci passa: col
+    mouse il trascinamento non ha mai scrollato niente, quindi dipinge sempre.
+  - Il `touch-action` è la metà CSS della stessa decisione, e va tenuta in
+    accordo con la guardia in `onPointerDown`: la riga dichiara `pan-x pan-y`
+    finché il dito scorre e `none` solo in «Dipingi», perché un trascinamento
+    interrotto dallo scorrimento non arriverebbe mai in fondo. Per lo stesso
+    motivo `.grid` dichiara **entrambi** gli assi: con il solo `pan-y` il
+    browser rifiutava di scorrere la griglia proprio nel verso in cui è
+    tagliata.
+  - Sotto i 700 px il nome del giorno e il menù della giornata tipo passano
+    *sopra* la riga: la colonna dei giorni si mangiava metà della larghezza, ed
+    era la metà che serve alle fasce. L'etichetta resta `sticky` a sinistra,
+    altrimenti scorrendo verso sera si perde di vista quale riga si sta
+    dipingendo.
 - Il momento in cui si chiede "modifica per tutti o scollega?" è la pennellata
   su una giornata tipo condivisa (`ProgramTab.tsx`): è lì che l'utente scopre
   la condivisione, ed è lì che ha senso offrire la scappatoia.

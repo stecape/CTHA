@@ -117,6 +117,11 @@ const { window } = dom;
 window.Element.prototype.setPointerCapture = () => {};
 window.Element.prototype.releasePointerCapture = () => {};
 
+// Il pannello mostra l'interruttore «Scorri / Dipingi» solo dove esiste un
+// dito, e lo decide una volta sola quando il bundle viene valutato: la finta
+// deve stare prima della `window.eval`.
+Object.defineProperty(window.navigator, "maxTouchPoints", { value: 1 });
+
 const calls = [];
 const hass = {
   states: {
@@ -225,6 +230,62 @@ assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), {
     level: "alta",
   },
 });
+
+// --- Il dito: prima scorre, poi dipinge ------------------------------------
+
+// Su un telefono la griglia è più larga dello schermo e lo stesso gesto
+// servirebbe a due cose. Di base il dito scorre: toccare una riga non deve
+// cambiare il programma.
+const modes = query(".switch-option");
+assert.deepEqual(
+  modes.map((node) => node.textContent),
+  ["Scorri", "Dipingi"],
+  "l'interruttore deve offrire scorrimento e pennello",
+);
+assert.equal(
+  modes[0].getAttribute("aria-pressed"),
+  "true",
+  "si parte da «Scorri»: una pennellata involontaria cambierebbe il programma",
+);
+
+const touch = (node, type) => {
+  const event = new window.MouseEvent(type, {
+    bubbles: true,
+    clientX: 0,
+    clientY: 0,
+  });
+  Object.defineProperty(event, "pointerType", { value: "touch" });
+  node.dispatchEvent(event);
+};
+
+const before = calls.length;
+touch(saturday, "pointerdown");
+touch(saturday, "pointerup");
+await settle();
+
+assert.equal(calls.length, before, "in «Scorri» il dito non deve programmare");
+assert.ok(
+  !text().includes("Questa giornata tipo è condivisa"),
+  "e non deve nemmeno aprire il dialogo della condivisione",
+);
+
+// Passando a «Dipingi» lo stesso gesto torna a essere una pennellata.
+click(modes[1]);
+await settle();
+touch(saturday, "pointerdown");
+touch(saturday, "pointerup");
+await settle();
+
+assert.ok(
+  text().includes("Questa giornata tipo è condivisa"),
+  "in «Dipingi» il dito deve programmare come il mouse",
+);
+
+const [cancel] = query(".dialog-actions .btn").filter(
+  (node) => node.textContent === "Annulla",
+);
+click(cancel);
+await settle();
 
 // --- Scenari: la configurazione delle zone ---------------------------------
 
