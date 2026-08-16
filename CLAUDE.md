@@ -88,7 +88,8 @@ diagnostics/             # strumenti standalone, indipendenti da HA (vedi diagno
 requirements_diagnostics.txt  # dipendenze dei soli strumenti diagnostici
 todo.md                  # checklist operativa degli step immediati in corso
 .github/workflows/ci.yml # test, lint, build del pannello, bundle allineato
-.github/workflows/release.yml  # un tag vX.Y.Z pubblica la release (HACS legge quelle)
+.github/workflows/release.yml  # bump del manifest + CI verde = tag e release (HACS legge quelle)
+release_notes/           # note di rilascio per versione, lette dal workflow
 hacs.json                # metadati per la distribuzione via HACS
 README.md                # documentazione utente (installazione, config, roadmap)
 ```
@@ -357,8 +358,8 @@ committare anche `custom_components/ctha/frontend/ctha-panel.js`.
   utente-visibile, insieme a `frontend/package.json` e al suo lockfile — se il
   lockfile resta indietro, `npm ci` fallisce in CI per disallineamento. Il bump
   invalida anche la cache del bundle nel browser, perché `panel.py` serve il
-  modulo con `?v=<versione del manifest>`. Da solo però non pubblica niente:
-  perché l'aggiornamento arrivi serve un tag, vedi «Pubblicare una versione».
+  modulo con `?v=<versione del manifest>`. Il bump è anche ciò che *innesca* il
+  rilascio: vedi «Pubblicare una versione».
 
 ## Sviluppo e test
 
@@ -430,35 +431,40 @@ fallire il controllo per un motivo che non c'entra con la modifica.
 
 ### Pubblicare una versione
 
-`.github/workflows/release.yml` parte su un tag `vX.Y.Z` e pubblica la release.
-Non è un automatismo di comodo: **HACS guarda le release, non `main`**, quindi
-un bump di `manifest.json` committato senza release non arriva a nessuno — il
-pannello resta quello vecchio e Home Assistant non propone l'aggiornamento,
-senza un errore da nessuna parte. Era il passo a mano che si dimenticava.
+**Non si crea un tag a mano, e non si pubblica niente a mano.** Il rilascio è
+tutto in `.github/workflows/release.yml`, e si innesca da solo:
 
-Le note di rilascio stanno nel **messaggio del tag annotato**: prima riga il
-titolo, il resto il corpo. Sono scritte al momento del tag di proposito, perché
-il racconto di una versione appartiene alla versione, non a un campo da
-riempire dopo averla già pubblicata.
+1. si porta avanti `version` in `manifest.json` (più `frontend/package.json` e
+   il lockfile) e si scrivono le note in `release_notes/vX.Y.Z.md`;
+2. si committa e si pusha su `main`;
+3. a CI verde, il workflow vede che quella versione non è mai uscita, crea il
+   tag annotato e pubblica la release.
 
-```bash
-git tag -a v0.11.0 --cleanup=verbatim -F note.md
-git push origin v0.11.0
-```
+Il perché di questo automatismo: **HACS guarda le release, non `main`**. Un bump
+committato senza release non arriva a nessuno — il pannello resta quello vecchio
+e Home Assistant non propone l'aggiornamento, senza un errore da nessuna parte.
+Era il passo a mano che si dimenticava, ed è esattamente ciò che è successo alla
+0.11.0 la prima volta.
 
-**`--cleanup=verbatim` non è opzionale.** Di default git tratta come commenti
-le righe che iniziano con `#` e le toglie dal messaggio: senza quel flag ogni
-titolo markdown delle note (`## …`) sparisce in silenzio, e la release viene
-pubblicata con i paragrafi tutti attaccati. Il tag va scritto da file, non
-dall'editor, per lo stesso motivo — così il testo che si rilegge è quello che
-verrà pubblicato.
+Tre scelte del workflow che vale la pena non riscoprire:
 
-Prima di creare la release il job verifica che il tag e la `version` in
-`manifest.json` dicano la stessa cosa, e fallisce se divergono: il tag è ciò
-che HACS usa per decidere se proporre l'aggiornamento, il manifest è ciò che
-mostra dopo averlo installato, e due numeri diversi vorrebbero dire aggiornare
-alla 0.11.0 e ritrovarsi la 0.10.0 nell'interfaccia. Quindi l'ordine è: bump del
-manifest, commit, *poi* tag.
+- **Parte a valle della CI** (`workflow_run`), non sul push: una release che
+  esce da un albero rotto è peggio di una release che manca, e il controllo del
+  bundle disallineato vive nella CI. Per lo stesso motivo fa il checkout di
+  `workflow_run.head_sha`, cioè del commit che la CI ha davvero verificato, non
+  della punta del branch che nel frattempo può essere andata avanti.
+- **Decide guardando i tag, non il commit precedente**: se `vX.Y.Z` esiste già
+  non fa nulla. Così una ri-esecuzione, un revert o un bump arrivato in più
+  commit non producono né doppioni né release mancate.
+- **`--cleanup=verbatim` non è opzionale** quando scrive il tag dal file delle
+  note. Di default git tratta come commenti le righe che iniziano con `#` e le
+  toglie dal messaggio: senza quel flag ogni titolo markdown (`## …`) sparisce
+  in silenzio e la release esce coi paragrafi tutti attaccati.
+
+Le note stanno in un file versionato invece che nel messaggio del tag perché il
+tag lo scrive il workflow: `release_notes/vX.Y.Z.md`, prima riga il titolo e il
+resto il corpo. Se il file manca la release esce lo stesso, con le note generate
+da GitHub dai commit — spoglia, ma esce.
 
 Non c'è ancora un ambiente HA di sviluppo nel repo. Per validare a mano le
 parti che toccano HA:

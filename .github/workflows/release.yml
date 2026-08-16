@@ -1,61 +1,91 @@
 name: Release
 
-# Un tag `vX.Y.Z` pubblica la release. Il passo esisteva già ma era a mano, ed
-# è esattamente quello che si dimentica: senza release HACS non propone
-# l'aggiornamento, perché guarda le release e non il contenuto di `main`.
+# Nessun tag scritto a mano: quando la `version` di manifest.json è una che non
+# è mai stata pubblicata, questo workflow crea il tag e la release da sé.
+#
+# È il passo che si dimenticava, e dimenticarlo non dà errore da nessuna parte:
+# HACS guarda le release, non `main`, quindi un bump committato senza release
+# lascia semplicemente tutti sulla versione vecchia.
 on:
-  push:
-    tags: ["v*"]
+  # Non su `push`, ma a valle della CI: una release che esce da un albero rotto
+  # è peggio di una release che manca, e il controllo del bundle disallineato
+  # vive proprio lì.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   release:
-    name: Pubblica la release dal tag
+    name: Pubblica se il manifest porta una versione nuova
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: actions/checkout@v4
         with:
+          # Su `workflow_run` il ref di default è la punta del branch, che può
+          # già essere avanti: si pubblica esattamente il commit che la CI ha
+          # verificato. `fetch-depth: 0` serve ai tag, che sono ciò con cui si
+          # decide se questa versione è già uscita.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
           fetch-depth: 0
 
-      # `actions/checkout` porta il commit del tag, non l'oggetto del tag
-      # annotato: senza questo fetch il messaggio — cioè le note di rilascio —
-      # non esiste sul runner.
-      - name: Recupera il messaggio del tag
-        run: git fetch --force --tags
-
-      # La versione nel manifest è quella che HACS mostra dopo l'installazione,
-      # il tag è quella che usa per decidere se proporre l'aggiornamento: se le
-      # due divergono, l'utente aggiorna e si ritrova un numero diverso da
-      # quello che ha scelto.
-      - name: Il manifest concorda col tag
+      - name: Legge la versione dal manifest
+        id: manifest
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          manifest="$(python3 -c 'import json;print(json.load(open("custom_components/ctha/manifest.json"))["version"])')"
-          if [ "$tag" != "$manifest" ]; then
-            echo "::error::Il tag è $GITHUB_REF_NAME ma manifest.json dice $manifest. Allineali prima di taggare."
-            exit 1
+          version="$(python3 -c 'import json; print(json.load(open("custom_components/ctha/manifest.json"))["version"])')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Versione nel manifest: $version"
+
+      # Il confronto è col tag, non col commit precedente: regge anche una
+      # ri-esecuzione, un revert o un bump arrivato in più commit.
+      - name: È già pubblicata?
+        id: check
+        run: |
+          tag="${{ steps.manifest.outputs.tag }}"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag esiste già: niente da pubblicare."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$tag non esiste ancora: si pubblica."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Le note stanno nel messaggio del tag annotato: prima riga il titolo, il
-      # resto il corpo. Scriverle al momento del tag tiene il racconto della
-      # versione attaccato alla versione, invece che in un campo da riempire
-      # dopo averla già pubblicata.
-      - name: Crea la release
+      # Le note stanno in `release_notes/vX.Y.Z.md`, scritte insieme al bump:
+      # prima riga il titolo, il resto il corpo. Se il file manca si pubblica
+      # comunque, con le note generate da GitHub dai commit — una release
+      # spoglia è meglio di una release che non esce.
+      #
+      # `--cleanup=verbatim` non è opzionale: senza, git tratta come commenti
+      # le righe che iniziano con `#` e ogni titolo markdown sparirebbe in
+      # silenzio dal messaggio del tag.
+      - name: Crea il tag e pubblica la release
+        if: steps.check.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          message="$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME")"
-          title="$(printf '%s\n' "$message" | head -1)"
-          body="$(printf '%s\n' "$message" | tail -n +2)"
+          tag="${{ steps.manifest.outputs.tag }}"
+          notes="release_notes/${tag}.md"
 
-          if [ -z "$title" ]; then
-            echo "::error::Il tag $GITHUB_REF_NAME non ha un messaggio: serve un tag annotato (git tag -a)."
-            exit 1
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ -f "$notes" ]; then
+            title="$(head -1 "$notes")"
+            tail -n +2 "$notes" > "$RUNNER_TEMP/body.md"
+            git tag -a "$tag" --cleanup=verbatim -F "$notes"
+            git push origin "$tag"
+            gh release create "$tag" --title "$title" --notes-file "$RUNNER_TEMP/body.md"
+          else
+            echo "::warning::$notes non esiste: note generate automaticamente."
+            git tag -a "$tag" -m "$tag"
+            git push origin "$tag"
+            gh release create "$tag" --title "$tag" --generate-notes
           fi
-
-          printf '%s\n' "$body" > release-notes.md
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$title" \
-            --notes-file release-notes.md
