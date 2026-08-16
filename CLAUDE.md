@@ -442,9 +442,16 @@ il racconto di una versione appartiene alla versione, non a un campo da
 riempire dopo averla già pubblicata.
 
 ```bash
-git tag -a v0.11.0        # apre l'editor: prima riga il titolo, poi le note
+git tag -a v0.11.0 --cleanup=verbatim -F note.md
 git push origin v0.11.0
 ```
+
+**`--cleanup=verbatim` non è opzionale.** Di default git tratta come commenti
+le righe che iniziano con `#` e le toglie dal messaggio: senza quel flag ogni
+titolo markdown delle note (`## …`) sparisce in silenzio, e la release viene
+pubblicata con i paragrafi tutti attaccati. Il tag va scritto da file, non
+dall'editor, per lo stesso motivo — così il testo che si rilegge è quello che
+verrà pubblicato.
 
 Prima di creare la release il job verifica che il tag e la `version` in
 `manifest.json` dicano la stessa cosa, e fallisce se divergono: il tag è ciò
