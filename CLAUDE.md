@@ -87,6 +87,7 @@ requirements_test.txt    # solo pytest: la suite non ha bisogno di HA
 diagnostics/             # strumenti standalone, indipendenti da HA (vedi diagnostics/README.md)
 requirements_diagnostics.txt  # dipendenze dei soli strumenti diagnostici
 todo.md                  # checklist operativa degli step immediati in corso
+.github/workflows/ci.yml # test, lint, build del pannello, bundle allineato
 hacs.json                # metadati per la distribuzione via HACS
 README.md                # documentazione utente (installazione, config, roadmap)
 ```
@@ -306,6 +307,18 @@ Il frontend è React dentro un Web Component su shadow root (`frontend/src/`):
     era la metà che serve alle fasce. L'etichetta resta `sticky` a sinistra,
     altrimenti scorrendo verso sera si perde di vista quale riga si sta
     dipingendo.
+  - **Su mobile la griglia è larga 960 px, non quanto ci sta.** A 520 px una
+    mezz'ora era più stretta di un polpastrello e per prendere la fascia giusta
+    bisognava mirare; a 960 px ogni slot è una tacca da 20 px. Si scorre di più,
+    ma si dipinge quello che si voleva dipingere — ed è il motivo per cui il
+    breakpoint *allarga* invece di comprimere.
+  - Il righello delle ore porta una tacca ogni due ore (`HOUR_LABELS` in
+    `WeekGrid.tsx`, `repeat(12, 1fr)` in `.hours`): i due numeri vanno tenuti in
+    accordo, altrimenti le etichette non cadono più sui confini degli slot che
+    dicono di marcare. Il righello però resta in cima e sparisce appena si
+    scorre, quindi le celle marcano da sé le quattro parti della giornata
+    (`.cell.quarter`, ogni sei ore): senza quelle, a metà settimana non si
+    saprebbe più a che ora si sta dipingendo.
 - Il momento in cui si chiede "modifica per tutti o scollega?" è la pennellata
   su una giornata tipo condivisa (`ProgramTab.tsx`): è lì che l'utente scopre
   la condivisione, ed è lì che ha senso offrire la scappatoia.
@@ -380,6 +393,35 @@ non esegue nulla:
 Non verifica la logica, ma prende import inutilizzati e nomi inesistenti anche
 lì dove non si può importare niente. Vale la pena lanciarlo dopo ogni modifica
 a `climate.py`, `coordinator.py`, `services.py`, `websocket.py`, `panel.py`.
+
+### La CI
+
+`.github/workflows/ci.yml` gira su ogni push a `main`, su ogni pull request e a
+mano (`workflow_dispatch`). Sono gli stessi comandi di sopra, in due job
+paralleli — nessun passo che non si possa rifare in locale, di proposito:
+
+- **`python`** — `pytest` sul nucleo puro, poi
+  `pyflakes custom_components/ctha tests diagnostics`. Il perimetro di pyflakes
+  è più largo di quello dei test apposta: né Home Assistant né `OWNd` sono
+  installati nel job, e pyflakes è l'unico controllo che arriva dove l'import
+  fallirebbe. È anche il motivo per cui `diagnostics/` è nell'elenco pur non
+  avendo test.
+- **`frontend`** — `npm ci` e `npm run check` (tsc, build Vite, smoke in
+  jsdom), e infine **il controllo che il bundle committato sia aggiornato**:
+  se il build ha modificato `custom_components/ctha/frontend/ctha-panel.js`,
+  il job fallisce.
+
+Quel controllo finale è la ragione principale per cui la CI esiste. Il bundle è
+versionato perché HACS distribuisce il repository così com'è, quindi un
+sorgente committato senza il bundle rifatto non rompe nulla in locale — rompe
+l'installazione di chi aggiorna da HACS, che si ritrova il pannello vecchio
+senza un errore da nessuna parte. Se il job segnala il disallineamento, la
+correzione è sempre la stessa: `cd frontend && npm run check` e committare
+anche il bundle.
+
+Le versioni di Node e Python nel workflow sono fissate (22 e 3.13): il bundle è
+confrontato byte a byte, quindi cambiarle a caso è il modo più rapido di far
+fallire il controllo per un motivo che non c'entra con la modifica.
 
 Non c'è ancora un ambiente HA di sviluppo nel repo. Per validare a mano le
 parti che toccano HA:

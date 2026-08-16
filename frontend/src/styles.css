@@ -289,10 +289,13 @@ label.field {
   font-size: 12px;
 }
 
+/* Dodici tacche, una ogni due ore: il numero di colonne deve restare in
+   accordo con `HOUR_LABELS` in WeekGrid.tsx, altrimenti le etichette non
+   cadono più sui confini degli slot che dicono di marcare. */
 .hours {
   grid-column: 2;
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(12, 1fr);
   font-size: 11px;
   color: var(--ctha-muted);
   padding-bottom: 2px;
@@ -301,6 +304,13 @@ label.field {
 .hours span {
   border-left: 1px solid var(--ctha-divider);
   padding-left: 3px;
+}
+
+/* Le quattro parti della giornata sono più marcate anche nel righello: sono
+   le stesse a cui rispondono le celle `.quarter`. */
+.hours span:nth-child(3n + 1) {
+  border-left-color: color-mix(in srgb, var(--ctha-text) 30%, transparent);
+  color: var(--ctha-text);
 }
 
 .day-label {
@@ -408,6 +418,13 @@ label.field {
 
 .cell.hour {
   border-right-color: color-mix(in srgb, var(--ctha-text) 18%, transparent);
+}
+
+/* Ogni sei ore una riga più netta: scorrendo la griglia il righello resta in
+   cima e fuori campo, e senza questi quarti non si saprebbe più a che ora si
+   sta dipingendo. */
+.cell.quarter {
+  border-right-color: color-mix(in srgb, var(--ctha-text) 42%, transparent);
 }
 
 .cell:last-child {
@@ -642,9 +659,13 @@ input[type="color"] {
     padding: 12px 8px;
   }
 
+  /* Larga quasi il doppio della finestra, non quanto ci sta: in 520 px una
+     mezz'ora era un dito di larghezza e mezzo, e per prendere la fascia giusta
+     bisognava mirare. A 960 px ogni slot è una tacca da 20 px — si scorre di
+     più, ma si dipinge quello che si voleva dipingere. */
   .grid {
     grid-template-columns: 1fr;
-    min-width: 520px;
+    min-width: 960px;
     gap: 2px 0;
   }
 
@@ -654,8 +675,12 @@ input[type="color"] {
     display: none;
   }
 
+  /* Il righello è la chiave di lettura della barra, e su un telefono compete
+     con tutto il resto: qui è leggibile quanto il testo normale. */
   .hours {
     grid-column: 1;
+    font-size: 12px;
+    padding-bottom: 4px;
   }
 
   .day-label {

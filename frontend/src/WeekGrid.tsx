@@ -26,6 +26,17 @@ import type { Program, TemperatureLevel } from "./types";
 const HAS_TOUCH =
   typeof navigator !== "undefined" && (navigator.maxTouchPoints ?? 0) > 0;
 
+// Un'etichetta ogni due ore: deve dividere 24 senza resto, altrimenti il
+// righello non cade sui confini degli slot. Dodici tacche stanno comode anche
+// nella griglia stretta del desktop, e su un telefono — dove la griglia è
+// larga quasi il doppio — danno un riferimento ogni quattro slot.
+const HOUR_LABELS = 12;
+
+// Ogni sei ore la cella chiude un blocco: sono le quattro parti in cui si
+// legge una giornata (notte, mattina, pomeriggio, sera). Serve a orientarsi
+// quando si è scrollati a metà settimana e il righello è fuori campo.
+const SLOTS_PER_QUARTER = SLOTS_PER_DAY / 4;
+
 interface Drag {
   weekday: number;
   anchor: number;
@@ -142,8 +153,10 @@ export function WeekGrid({
         <div className="grid">
           <div className="corner" />
           <div className="hours">
-            {Array.from({ length: 8 }, (_, index) => (
-              <span key={index}>{String(index * 3).padStart(2, "0")}</span>
+            {Array.from({ length: HOUR_LABELS }, (_, index) => (
+              <span key={index}>
+                {String(index * (24 / HOUR_LABELS)).padStart(2, "0")}
+              </span>
             ))}
           </div>
 
@@ -286,6 +299,7 @@ function Row({
                   "cell",
                   level ? "" : "inherit",
                   slot % 2 === 1 ? "hour" : "",
+                  slot % SLOTS_PER_QUARTER === SLOTS_PER_QUARTER - 1 ? "quarter" : "",
                   inPaint ? "painting" : "",
                 ]
                   .filter(Boolean)
