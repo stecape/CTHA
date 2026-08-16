@@ -88,6 +88,7 @@ diagnostics/             # strumenti standalone, indipendenti da HA (vedi diagno
 requirements_diagnostics.txt  # dipendenze dei soli strumenti diagnostici
 todo.md                  # checklist operativa degli step immediati in corso
 .github/workflows/ci.yml # test, lint, build del pannello, bundle allineato
+.github/workflows/release.yml  # un tag vX.Y.Z pubblica la release (HACS legge quelle)
 hacs.json                # metadati per la distribuzione via HACS
 README.md                # documentazione utente (installazione, config, roadmap)
 ```
@@ -353,7 +354,11 @@ committare anche `custom_components/ctha/frontend/ctha-panel.js`.
   `services.py` (schema e handler), `services.yaml` (selettori), `strings.json`
   e le due traduzioni.
 - Bump di `version` in `manifest.json` quando si rilascia una modifica
-  utente-visibile (HACS legge questo campo).
+  utente-visibile, insieme a `frontend/package.json` e al suo lockfile — se il
+  lockfile resta indietro, `npm ci` fallisce in CI per disallineamento. Il bump
+  invalida anche la cache del bundle nel browser, perché `panel.py` serve il
+  modulo con `?v=<versione del manifest>`. Da solo però non pubblica niente:
+  perché l'aggiornamento arrivi serve un tag, vedi «Pubblicare una versione».
 
 ## Sviluppo e test
 
@@ -422,6 +427,31 @@ anche il bundle.
 Le versioni di Node e Python nel workflow sono fissate (22 e 3.13): il bundle è
 confrontato byte a byte, quindi cambiarle a caso è il modo più rapido di far
 fallire il controllo per un motivo che non c'entra con la modifica.
+
+### Pubblicare una versione
+
+`.github/workflows/release.yml` parte su un tag `vX.Y.Z` e pubblica la release.
+Non è un automatismo di comodo: **HACS guarda le release, non `main`**, quindi
+un bump di `manifest.json` committato senza release non arriva a nessuno — il
+pannello resta quello vecchio e Home Assistant non propone l'aggiornamento,
+senza un errore da nessuna parte. Era il passo a mano che si dimenticava.
+
+Le note di rilascio stanno nel **messaggio del tag annotato**: prima riga il
+titolo, il resto il corpo. Sono scritte al momento del tag di proposito, perché
+il racconto di una versione appartiene alla versione, non a un campo da
+riempire dopo averla già pubblicata.
+
+```bash
+git tag -a v0.11.0        # apre l'editor: prima riga il titolo, poi le note
+git push origin v0.11.0
+```
+
+Prima di creare la release il job verifica che il tag e la `version` in
+`manifest.json` dicano la stessa cosa, e fallisce se divergono: il tag è ciò
+che HACS usa per decidere se proporre l'aggiornamento, il manifest è ciò che
+mostra dopo averlo installato, e due numeri diversi vorrebbero dire aggiornare
+alla 0.11.0 e ritrovarsi la 0.10.0 nell'interfaccia. Quindi l'ordine è: bump del
+manifest, commit, *poi* tag.
 
 Non c'è ancora un ambiente HA di sviluppo nel repo. Per validare a mano le
 parti che toccano HA:
