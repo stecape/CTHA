@@ -308,9 +308,72 @@ label.field {
 
 /* Le quattro parti della giornata sono più marcate anche nel righello: sono
    le stesse a cui rispondono le celle `.quarter`. */
-.hours span:nth-child(3n + 1) {
+.hours span:nth-child(3n + 1),
+.row-hours span:nth-child(3n + 1) {
   border-left-color: color-mix(in srgb, var(--ctha-text) 30%, transparent);
   color: var(--ctha-text);
+}
+
+/* Il righello di riga esiste solo su schermo stretto (vedi il blocco in fondo):
+   su desktop quello in cima si vede da tutte le righe, e ripeterlo sette volte
+   sarebbe solo rumore. */
+.row-hours {
+  display: none;
+  grid-template-columns: repeat(12, 1fr);
+  font-size: 11px;
+  color: var(--ctha-muted);
+}
+
+.row-hours span {
+  border-left: 1px solid var(--ctha-divider);
+  padding-left: 3px;
+}
+
+/* La lettura dell'intervallo mentre si dipinge. È ancorata allo schermo e non
+   alla griglia: serve proprio quando la griglia è scrollata lontano dal
+   righello, quindi seguirla vanificherebbe lo scopo. */
+.paint-readout {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--ctha-card);
+  border: 1px solid var(--ctha-divider);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  /* Il dito sta trascinando: la targhetta non deve mai rubargli il gesto. */
+  pointer-events: none;
+  max-width: calc(100vw - 24px);
+}
+
+.paint-day {
+  text-transform: capitalize;
+  color: var(--ctha-muted);
+}
+
+.paint-range {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.paint-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ctha-muted);
+}
+
+.paint-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--ctha-divider);
 }
 
 .day-label {
@@ -675,12 +738,21 @@ input[type="color"] {
     display: none;
   }
 
-  /* Il righello è la chiave di lettura della barra, e su un telefono compete
-     con tutto il resto: qui è leggibile quanto il testo normale. */
+  /* Quello in cima sparisce: da qui in giù ogni giorno porta il proprio, e
+     tenerli entrambi metterebbe due righelli a tre centimetri di distanza. */
   .hours {
+    display: none;
+  }
+
+  /* Il righello sotto ogni giorno è ciò che toglie l'incertezza: dipingendo il
+     venerdì, l'ora sta sotto il dito invece che in cima alla pagina. È
+     leggibile quanto il testo normale, perché è la chiave di lettura della
+     barra e non una decorazione. */
+  .row-hours {
+    display: grid;
     grid-column: 1;
     font-size: 12px;
-    padding-bottom: 4px;
+    padding-top: 3px;
   }
 
   .day-label {

@@ -287,6 +287,36 @@ const [cancel] = query(".dialog-actions .btn").filter(
 click(cancel);
 await settle();
 
+// --- L'intervallo si legge, non si stima -----------------------------------
+
+// Il righello dice l'ora solo finché lo si vede: scorrendo verso il fondo
+// della settimana esce di campo, e una mezz'ora è troppo stretta perché
+// l'occhio la conti. Durante il trascinamento l'intervallo va quindi scritto.
+assert.equal(
+  query(".paint-readout").length,
+  0,
+  "a riposo non deve esserci nessuna targhetta",
+);
+
+touch(saturday, "pointerdown");
+await settle();
+
+const [readout] = query(".paint-readout");
+assert.ok(readout, "trascinando deve comparire l'intervallo in chiaro");
+assert.ok(
+  readout.textContent.includes("00:00 – 00:30"),
+  `l'intervallo dev'essere leggibile: "${readout.textContent}"`,
+);
+
+// Un gesto annullato non lascia la targhetta appesa.
+touch(saturday, "pointercancel");
+await settle();
+assert.equal(
+  query(".paint-readout").length,
+  0,
+  "e sparire quando il gesto finisce",
+);
+
 // --- Scenari: la configurazione delle zone ---------------------------------
 
 await openTab("Scenari");

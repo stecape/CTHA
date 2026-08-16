@@ -315,12 +315,21 @@ Il frontend è React dentro un Web Component su shadow root (`frontend/src/`):
     ma si dipinge quello che si voleva dipingere — ed è il motivo per cui il
     breakpoint *allarga* invece di comprimere.
   - Il righello delle ore porta una tacca ogni due ore (`HOUR_LABELS` in
-    `WeekGrid.tsx`, `repeat(12, 1fr)` in `.hours`): i due numeri vanno tenuti in
-    accordo, altrimenti le etichette non cadono più sui confini degli slot che
-    dicono di marcare. Il righello però resta in cima e sparisce appena si
-    scorre, quindi le celle marcano da sé le quattro parti della giornata
-    (`.cell.quarter`, ogni sei ore): senza quelle, a metà settimana non si
-    saprebbe più a che ora si sta dipingendo.
+    `WeekGrid.tsx`, `repeat(12, 1fr)` in `.hours` e `.row-hours`): i tre numeri
+    vanno tenuti in accordo, altrimenti le etichette non cadono più sui confini
+    degli slot che dicono di marcare. Le celle marcano inoltre da sé le quattro
+    parti della giornata (`.cell.quarter`, ogni sei ore).
+  - **Il righello è uno solo in cima su desktop e uno per giorno su mobile**, ed
+    è lo stesso componente (`HourRuler`) sotto due classi: su uno schermo alto
+    quello in cima si vede da tutte le righe, su un telefono esce di campo dopo
+    la seconda e da lì in giù resta solo il colore. Sotto i 700 px `.hours`
+    sparisce e compare `.row-hours`, altrimenti sarebbero due righelli a tre
+    centimetri l'uno dall'altro.
+  - `.paint-readout` è la targhetta con giorno, intervallo e livello che compare
+    durante il trascinamento. È `position: fixed` **di proposito**: serve quando
+    la griglia è scrollata lontano dal righello, quindi ancorarla alla griglia
+    vanificherebbe lo scopo. Ha `pointer-events: none` perché nasce sotto il
+    dito che sta dipingendo e non deve mai rubargli il gesto.
 - Il momento in cui si chiede "modifica per tutti o scollega?" è la pennellata
   su una giornata tipo condivisa (`ProgramTab.tsx`): è lì che l'utente scopre
   la condivisione, ed è lì che ha senso offrire la scappatoia.

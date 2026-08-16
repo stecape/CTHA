@@ -18,7 +18,14 @@
 
 import { useRef, useState } from "react";
 
-import { SLOTS_PER_DAY, WEEKDAYS, levelAt, slotRange, sortedDayTemplates } from "./model";
+import {
+  SLOTS_PER_DAY,
+  WEEKDAYS,
+  levelAt,
+  slotRange,
+  slotTime,
+  sortedDayTemplates,
+} from "./model";
 import type { Program, TemperatureLevel } from "./types";
 
 // L'interruttore ha senso solo dove esiste un dito. Su un desktop senza touch
@@ -36,6 +43,27 @@ const HOUR_LABELS = 12;
 // legge una giornata (notte, mattina, pomeriggio, sera). Serve a orientarsi
 // quando si è scrollati a metà settimana e il righello è fuori campo.
 const SLOTS_PER_QUARTER = SLOTS_PER_DAY / 4;
+
+// Fine dell'ultimo slot: `slotTime` dà l'inizio, e per lo slot 47 l'inizio del
+// successivo sarebbe «00:00», che come *fine* di una giornata si legge male.
+function slotEnd(slot: number): string {
+  return slot + 1 >= SLOTS_PER_DAY ? "24:00" : slotTime(slot + 1);
+}
+
+// Il righello: le stesse tacche in cima alla griglia e sotto ogni giorno. Non
+// sono due componenti perché devono restare identiche — se una cadesse su
+// confini diversi dall'altra non si capirebbe più a quale credere.
+function HourRuler({ className }: { className: string }) {
+  return (
+    <div className={className} aria-hidden="true">
+      {Array.from({ length: HOUR_LABELS }, (_, index) => (
+        <span key={index}>
+          {String(index * (24 / HOUR_LABELS)).padStart(2, "0")}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 interface Drag {
   weekday: number;
@@ -152,13 +180,7 @@ export function WeekGrid({
       <div className="grid-scroll">
         <div className="grid">
           <div className="corner" />
-          <div className="hours">
-            {Array.from({ length: HOUR_LABELS }, (_, index) => (
-              <span key={index}>
-                {String(index * (24 / HOUR_LABELS)).padStart(2, "0")}
-              </span>
-            ))}
-          </div>
+          <HourRuler className="hours" />
 
           {WEEKDAYS.map((name, weekday) => {
             const templateId = week.days[String(weekday)];
@@ -195,6 +217,34 @@ export function WeekGrid({
           })}
         </div>
       </div>
+
+      {/* Mentre si dipinge, l'intervallo scritto a lettere. Il righello dice
+          dove si è solo se lo si vede: quando si è in fondo alla settimana è
+          fuori campo, e la mezz'ora è troppo stretta perché l'occhio la conti.
+          Qui l'ora non si stima, si legge — ed è ancorato allo schermo, così
+          vale a qualunque punto della griglia ci si trovi. */}
+      {drag && (
+        <div className="paint-readout" role="status" aria-live="polite">
+          <span className="paint-day">{WEEKDAYS[drag.weekday]}</span>
+          <span className="paint-range">
+            {slotTime(Math.min(drag.anchor, drag.head))} –{" "}
+            {slotEnd(Math.max(drag.anchor, drag.head))}
+          </span>
+          <span className="paint-level">
+            {brush ? (
+              <>
+                <span
+                  className="paint-swatch"
+                  style={{ background: brush.color }}
+                />
+                {brush.name}
+              </>
+            ) : (
+              "eredita"
+            )}
+          </span>
+        </div>
+      )}
     </>
   );
 }
@@ -313,6 +363,12 @@ function Row({
       ) : (
         <div className="row-cells empty" title="Nessuna giornata tipo assegnata" />
       )}
+
+      {/* Su schermo stretto ogni giorno porta il proprio righello: uno solo in
+          cima serve alla prima riga e a nessun'altra, perché scorrendo verso
+          sabato esce dallo schermo e resta solo il colore. Su desktop resta
+          quello in cima, che lì si vede da tutte le righe. */}
+      <HourRuler className="row-hours" />
     </>
   );
 }
